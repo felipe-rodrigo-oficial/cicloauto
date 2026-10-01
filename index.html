@@ -1,0 +1,1471 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#1b1c1f">
+<title>CicloAuto</title>
+<meta name="description" content="Bike dashboard for the phone on your handlebar: speedometer, map and navigation.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Semi+Condensed:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>
+  :root{
+    --bg:#1b1c1f; --body:#1f2024; --ink:#141518;
+    --cy:#29b6f6; --cy2:#6fd6ff; --cy-dim:rgba(41,182,246,.35);
+    --txt:#f4f6f8; --dim:#8b9099; --mute:#555a63; --seg:#2e3137;
+    --red:#ff2d3d; --amber:#ffb020; --green:#3ddc84;
+  }
+  *{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;background:var(--bg);color:var(--txt);overflow:hidden;user-select:none;
+            font-family:"Saira Semi Condensed",Roboto,system-ui,sans-serif;font-feature-settings:"tnum" 1}
+  button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+  svg.i{width:1.1em;height:1.1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+  .screen{
+    width:100vw;height:100vh;height:100dvh;position:relative;overflow:hidden;
+    font-size:min(2.15vw, 4.6vh);
+    display:flex;flex-direction:column;
+    padding:max(.5em, env(safe-area-inset-top)) max(.6em, env(safe-area-inset-right)) max(.3em, env(safe-area-inset-bottom)) max(.6em, env(safe-area-inset-left));
+    background:radial-gradient(70% 90% at 50% 40%, #26282d 0%, var(--bg) 70%);
+  }
+  .screen.night{filter:brightness(.6)}
+
+  /* ================= Cluster (bezel drawn in JS) ================= */
+  .cluster{position:relative;flex:1;min-height:0}
+  .bezel{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+
+  /* Map in the center, fading out at the edges */
+  .mapwrap{position:absolute;left:var(--mapl);right:var(--mapr);top:var(--mapt);bottom:var(--mapb)}
+  /* fade the map edges into the panel color (overlay gradients; a CSS mask on the WebGL canvas breaks on some devices) */
+  /* the map background is transparent (shows the panel); this panel-colored layer hides the streets near the edges */
+  .mapwrap::after{content:"";position:absolute;inset:-1px;pointer-events:none;z-index:1;
+    background:linear-gradient(180deg,#25272c,#191a1d);
+    -webkit-mask-image:linear-gradient(90deg,#000 0,transparent 22%,transparent 78%,#000 100%),linear-gradient(180deg,#000 0,transparent 30%,transparent 78%,#000 100%);
+    mask-image:linear-gradient(90deg,#000 0,transparent 22%,transparent 78%,#000 100%),linear-gradient(180deg,#000 0,transparent 30%,transparent 78%,#000 100%)}
+  #map{position:absolute;inset:0}
+  .credits{position:absolute;right:calc(var(--mapr) + 3%);top:calc(var(--topy) + 2.6em);z-index:3;width:1.3em;height:1.3em;border-radius:50%;
+           display:grid;place-items:center;color:var(--mute);border:1px solid rgba(255,255,255,.12);font:italic 700 .6em/1 Georgia,serif}
+  .credits:hover{color:var(--dim)}
+
+  /* Top center: temperature, signals, next turn, clock */
+  .topbar{position:absolute;left:var(--mapl);right:var(--mapr);top:var(--topy);display:grid;
+          grid-template-columns:1fr auto minmax(0,auto) auto 1fr;align-items:center;gap:.9em;z-index:3}
+  .temp{justify-self:end;font-size:.72em;font-weight:600;color:var(--txt);letter-spacing:.02em}
+  .dbg{position:absolute;left:calc(var(--mapl) + 2%);top:calc(var(--topy) + 8em);z-index:4;display:none;padding:.4em .6em;border-radius:.5em;
+       background:rgba(10,11,13,.88);border:1px solid var(--cy-dim);font:600 .4em/1.55 ui-monospace,Consolas,monospace;color:var(--txt);white-space:pre;pointer-events:none}
+  .dbg.show{display:block}
+  .temp{cursor:pointer}
+  .clock{justify-self:start;font-size:.72em;font-weight:600;letter-spacing:.04em;cursor:pointer}
+  .sig{width:1.9em;height:1.3em;display:grid;place-items:center;cursor:pointer;color:#2f3a42;transition:color .12s,filter .12s}
+  .sig svg{width:100%;height:100%;fill:currentColor}
+  .sig.active{color:#1c6f93}
+  .sig.active.lit{color:var(--cy2);filter:drop-shadow(0 0 .35em var(--cy)) drop-shadow(0 0 .8em var(--cy))}
+  .turn{display:flex;align-items:center;gap:.45em;min-width:0;max-width:100%}
+  .turn .ic{width:1.9em;height:1.9em;flex:none;display:grid;place-items:center}
+  .turn .ic svg{width:100%;height:100%;filter:drop-shadow(0 0 .3em rgba(255,255,255,.35))}
+  .turn .tx{display:flex;flex-direction:column;line-height:1;min-width:0;overflow:hidden}
+  .turn b{order:1;font-size:1.15em;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .turn b span{font-size:.6em;font-weight:700;margin-left:.1em}
+  .turn small{order:2;font-size:.42em;font-weight:600;letter-spacing:.1em;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:.25em}
+  .turn .st{order:3;font-size:.42em;font-weight:500;color:var(--cy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:12em;margin-top:.15em}
+  .turn.idle b{font-size:.62em;font-weight:600}
+  .turn.done b{font-size:.72em;font-weight:700}
+  .turn.done .ic svg path{stroke:var(--green)}
+
+  /* ================= Dials ================= */
+  .gauge{position:absolute;width:calc(var(--rg) * 2);height:calc(var(--rg) * 2);top:calc(var(--gy) - var(--rg));z-index:2}
+  .gauge.left{left:calc(var(--lx) - var(--rg))}
+  .gauge.right{left:calc(var(--rx) - var(--rg))}
+  .gauge svg{width:100%;height:100%;overflow:visible}
+  .gauge text{font-family:"Saira Semi Condensed",Roboto,sans-serif}
+  .g-lbl{font-size:10px;font-weight:600;letter-spacing:1.5px;fill:var(--cy)}
+  .g-num{font-size:62px;font-weight:700;fill:var(--txt);letter-spacing:-1px}
+  .g-unit{font-size:12px;font-weight:700;fill:var(--txt);letter-spacing:1px}
+  .g-sub{font-size:8.5px;font-weight:600;fill:var(--dim);letter-spacing:1px}
+  .spd{transition:fill .3s}
+  #arc{transition:stroke .3s}
+  .brake-bg{fill:none;stroke:rgba(255,45,61,.35);stroke-width:1}
+  .brake{font-size:8px;font-weight:700;letter-spacing:1.5px;fill:rgba(255,45,61,.55)}
+  .braking .brake{fill:#fff}
+  .braking .brake-bg{fill:var(--red);stroke:none;filter:drop-shadow(0 0 5px rgba(255,45,61,.9))}
+
+  /* ================= Bottom center: elevation + trip ================= */
+  .elevrow{position:absolute;left:calc(var(--mapl) + 7%);right:calc(var(--mapr) + 7%);bottom:var(--elevy);height:1.7em;display:flex;align-items:stretch;gap:.6em;z-index:3}
+  .chart{flex:1;position:relative;min-width:0}
+  .chart svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+  .chart .empty{position:absolute;inset:0;display:grid;place-items:center;font-size:.4em;letter-spacing:.08em;color:var(--mute)}
+  .cursor{position:absolute;top:0;bottom:0;width:0;display:none}
+  .chart.has .cursor{display:block}
+  .cursor .ln{position:absolute;top:0;bottom:0;left:0;border-left:1px dashed rgba(244,246,248,.35)}
+  .cursor .dot{position:absolute;left:0;width:.45em;height:.45em;border-radius:50%;background:#fff;transform:translate(-50%,-50%);box-shadow:0 0 .6em var(--cy)}
+  .cursor .lbl{position:absolute;bottom:100%;left:0;transform:translate(-50%,-.15em);font-size:.36em;font-weight:700;white-space:nowrap;color:var(--cy)}
+  .cursor.start .lbl{transform:translate(-.5em,-.15em)} .cursor.flip .lbl{transform:translate(calc(-100% + .5em),-.15em)}
+  .climb{display:flex;flex-direction:column;justify-content:center;align-items:flex-end;line-height:1.1}
+  .climb small{font-size:.34em;font-weight:600;letter-spacing:.12em;color:var(--dim)}
+  .climb b{font-size:.55em;font-weight:700}
+
+  .trip{position:absolute;left:var(--mapl);right:var(--mapr);bottom:var(--tripy);display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:.8em;z-index:3;white-space:nowrap}
+  .trip > span{display:flex;align-items:center;gap:.35em;font-size:.56em;font-weight:600}
+  .trip > span:first-child{justify-self:end} .trip > span:last-child{justify-self:start}
+  .tag{font-style:normal;background:var(--cy);color:#0b1a22;font-size:.72em;font-weight:800;letter-spacing:.06em;padding:.05em .35em;border-radius:.18em}
+  .trip .mid{font-size:.6em;color:var(--txt)} .trip .mid i{font-style:normal;color:var(--dim);font-size:.8em;letter-spacing:.1em;margin-right:.3em}
+
+  /* Segmented bars under the dials */
+  .bar{position:absolute;top:var(--bary);display:flex;align-items:center;gap:.45em;z-index:3;font-size:.55em;font-weight:600;white-space:nowrap}
+  .bar.left{left:calc(var(--lx) - var(--rg) * .62)} .bar.right{right:calc(100% - var(--rx) - var(--rg) * .62);flex-direction:row-reverse}
+  .segs{display:flex;gap:.16em}
+  .segs i{width:.42em;height:.75em;border-radius:.08em;background:var(--seg)}
+  .segs i.on{background:var(--cy);box-shadow:0 0 .4em var(--cy-dim)}
+  .segs.warn i.on{background:var(--amber);box-shadow:0 0 .4em rgba(255,176,32,.4)}
+  .segs.crit i.on{background:var(--red);box-shadow:0 0 .4em rgba(255,45,61,.45)}
+  .bar svg.i{width:1.15em;height:1.15em;color:var(--dim)}
+
+  /* Map markers */
+  .rider{width:2.2em;height:2.2em;display:grid;place-items:center;filter:drop-shadow(0 0 .45em var(--cy)) drop-shadow(0 0 1em rgba(41,182,246,.6))}
+  .rider svg{width:100%;height:100%}
+  .dest{width:1em;height:1em;border-radius:50%;background:var(--red);border:.18em solid #fff;box-shadow:0 0 1em var(--red)}
+
+  /* Recenter button, speed alert */
+  .recenter{position:absolute;left:calc(var(--mapl) + 14%);bottom:calc(var(--tripy) + 3.4em);z-index:4;display:none;align-items:center;gap:.4em;
+            padding:.35em .8em;border-radius:1em;background:rgba(20,21,24,.9);border:1px solid var(--cy-dim);color:var(--cy)}
+  .recenter span{font-size:.42em;font-weight:700;letter-spacing:.1em}
+  .recenter.show{display:flex}
+  .salert{position:absolute;left:50%;top:40%;z-index:6;display:flex;align-items:center;gap:.6em;padding:.4em 1em .4em .45em;
+          border-radius:1.2em;color:#fff;pointer-events:none;white-space:nowrap;background:var(--c);
+          box-shadow:0 0 0 .12em rgba(255,255,255,.15),0 .4em 2em var(--c);
+          opacity:0;transform:translate(-50%,.6em) scale(.94);transition:opacity .25s,transform .25s}
+  .salert.show{opacity:1;transform:translate(-50%,0) scale(1);animation:shake .45s .1s}
+  .salert .num{width:2.2em;height:2.2em;border-radius:50%;background:#fff;color:#111;display:grid;place-items:center;
+               border:.2em solid rgba(0,0,0,.25);font-weight:800;font-size:1em}
+  .salert .num span{font-size:.85em}
+  .salert .tx b{display:block;font-size:.62em;font-weight:700;letter-spacing:.02em}
+  .salert .tx small{display:block;font-size:.42em;font-weight:500;opacity:.9;letter-spacing:.04em}
+  @keyframes shake{20%,60%{transform:translate(calc(-50% - .25em),0)}40%,80%{transform:translate(calc(-50% + .25em),0)}}
+
+  /* ================= Control dock ================= */
+  .dock{flex:none;height:2.4em;display:flex;justify-content:center;align-items:center;gap:.5em;position:relative;z-index:5}
+  .dbtn{position:relative;height:1.8em;padding:0 .8em;border-radius:.9em;display:flex;align-items:center;gap:.4em;color:var(--dim);
+        background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);transition:all .2s}
+  .dbtn span{font-size:.46em;font-weight:700;letter-spacing:.12em}
+  .dbtn:hover{color:var(--txt)}
+  .dbtn.on{color:var(--cy);border-color:var(--cy-dim);background:rgba(41,182,246,.1);box-shadow:0 0 1em rgba(41,182,246,.18)}
+  .dbtn.hide{display:none}
+  .dbtn .st{position:absolute;top:.25em;right:.3em;width:.32em;height:.32em;border-radius:50%;display:none}
+  .dbtn.gps.on .st{display:block;background:var(--green);box-shadow:0 0 .4em var(--green)}
+  .dbtn.gps.on.weak .st{background:var(--amber);animation:pulse 1s infinite}
+  @keyframes pulse{50%{opacity:.25}}
+
+  /* Simulation slider popover */
+  .simpop{position:absolute;bottom:3em;left:50%;transform:translateX(-50%);z-index:7;width:15em;padding:.6em .8em .7em;border-radius:.9em;display:none;
+          background:rgba(24,25,29,.95);border:1px solid var(--cy-dim);box-shadow:0 .6em 2em rgba(0,0,0,.6)}
+  .simpop.open{display:block} .simpop.hide{display:none}
+  .simpop .row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:.35em}
+  .simpop .row span{font-size:.42em;font-weight:700;letter-spacing:.14em;color:var(--dim)}
+  .simpop .row b{font-size:.75em;font-weight:700;color:var(--cy)} .simpop .row b small{font-size:.6em;color:var(--dim)}
+  .simpop input{-webkit-appearance:none;appearance:none;width:100%;height:.3em;border-radius:1em;outline:none;cursor:pointer;
+             background:linear-gradient(90deg,var(--cy) 0,var(--cy) var(--p),var(--seg) var(--p))}
+  .simpop input::-webkit-slider-thumb{-webkit-appearance:none;width:1.1em;height:1.1em;border-radius:50%;background:#fff;box-shadow:0 0 0 .2em var(--cy-dim),0 0 .8em var(--cy)}
+  .simpop input::-moz-range-thumb{width:1.1em;height:1.1em;border-radius:50%;background:#fff;border:0;box-shadow:0 0 0 .2em var(--cy-dim),0 0 .8em var(--cy)}
+  .simpop .ticks{position:relative;height:.9em;margin:.3em .55em 0}
+  .simpop .ticks i{position:absolute;transform:translateX(-50%);font-style:normal;font-size:.36em;color:var(--mute);font-weight:600}
+
+  /* micro:bit menu (reuses the simulation popover look) */
+  .bitpop{width:15em}
+  .bitpop .pbtn{display:block;width:100%;margin-top:.4em;padding:.55em .7em;border-radius:.6em;text-align:left;
+                background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1)}
+  .bitpop .pbtn span{font-size:.5em;font-weight:700;letter-spacing:.08em}
+  .bitpop .pbtn small{display:block;font-size:.38em;color:var(--dim);margin-top:.15em}
+  .bitpop .pbtn:hover{border-color:var(--cy-dim);color:var(--cy)}
+  .bitpop .pbtn.hide{display:none}
+  .bitpop .note{display:block;font-size:.36em;color:var(--mute);margin-top:.5em;line-height:1.4}
+
+  /* Virtual micro:bit */
+  .vmb{position:absolute;left:max(.6em, env(safe-area-inset-left));bottom:2.9em;z-index:8;width:12.5em;padding:.5em .6em .6em;border-radius:1em;display:none;
+       background:rgba(24,25,29,.96);border:1px solid var(--cy-dim);box-shadow:0 .6em 2em rgba(0,0,0,.6)}
+  .vmb.open{display:block}
+  .vmb-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:.4em}
+  .vmb-head span{font-size:.42em;font-weight:700;letter-spacing:.14em;color:var(--cy)}
+  .vmb-head button{color:var(--dim);font-size:.6em;padding:0 .3em}
+  .board{display:flex;align-items:center;justify-content:center;padding:.7em .6em;border-radius:.7em;
+         background:linear-gradient(160deg,#2a2d33,#16171a);border:1px solid rgba(255,255,255,.08)}
+  .matrix{display:grid;grid-template-columns:repeat(5,1fr);gap:.32em}
+  .matrix i{width:.62em;height:.62em;border-radius:.1em;background:#3a1414;transition:background .05s}
+  .matrix i.on{background:#ff3b3b;box-shadow:0 0 .4em #ff3b3b,0 0 .15em #fff inset}
+  .vmb-note{display:block;margin-top:.45em;font-size:.36em;color:var(--mute);letter-spacing:.06em;line-height:1.35}
+  .vlog{margin-top:.45em;min-height:2.6em;font-size:.36em;line-height:1.5;color:var(--dim);font-family:ui-monospace,Consolas,monospace}
+  .vlog b{color:var(--cy);font-weight:600} .vlog em{color:var(--amber);font-style:normal}
+
+  /* SOS settings panel */
+  .sospanel{position:absolute;left:50%;top:50%;transform:translate(-50%,-55%);width:min(31em,88%);max-height:86%;overflow:auto;z-index:9;display:none;
+            padding:.7em .8em .8em;border-radius:1em;background:rgba(24,25,29,.97);border:1px solid rgba(255,45,61,.45);box-shadow:0 .8em 2.4em rgba(0,0,0,.6);
+            scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.15) transparent}
+  .sospanel.open{display:block}
+  .sp-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:.5em}
+  .sp-head span{font-size:.5em;font-weight:700;letter-spacing:.14em;color:var(--red)}
+  .sp-head button{color:var(--dim);font-size:.6em;padding:0 .3em}
+  .sw{display:flex;align-items:center;gap:.6em;padding:.5em .6em;border-radius:.6em;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);cursor:pointer}
+  .sw input{appearance:none;-webkit-appearance:none;flex:none;width:2.2em;height:1.2em;border-radius:1em;background:var(--seg);position:relative;cursor:pointer;transition:background .2s;margin:0}
+  .sw input::after{content:"";position:absolute;top:.15em;left:.15em;width:.9em;height:.9em;border-radius:50%;background:#fff;transition:left .2s}
+  .sw input:checked{background:var(--green)} .sw input:checked::after{left:1.15em}
+  .sw span{flex:1;font-size:.56em;font-weight:700;letter-spacing:.06em}
+  .sw small{font-size:.42em;color:var(--dim)}
+  .sp-grid{display:grid;grid-template-columns:1fr 1fr;gap:.45em;margin-top:.5em}
+  .sp-grid label{display:flex;flex-direction:column;gap:.25em;min-width:0}
+  .sp-grid label > span{font-size:.36em;font-weight:700;letter-spacing:.12em;color:var(--dim)}
+  .sp-grid .full{grid-column:1/-1}
+  .sp-grid .row{display:flex;gap:.3em}
+  .sp-grid input,.sp-grid select{flex:1;min-width:0;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:.5em;color:var(--txt);font:inherit;
+                 font-size:.55em;padding:.55em .7em;outline:none;user-select:text}
+  .sp-grid input:focus,.sp-grid select:focus{border-color:var(--cy)}
+  .sp-grid select option{background:#1f2024;color:var(--txt)}
+  .sp-grid .row button{flex:none;padding:0 .8em;border-radius:.5em;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);color:var(--dim);font-size:.42em;font-weight:700;letter-spacing:.1em}
+  .sp-note{display:block;font-size:.38em;color:var(--mute);margin-top:.55em;line-height:1.5}
+  .sp-note b{color:var(--dim)}
+  .sp-actions{display:flex;gap:.4em;margin-top:.6em}
+  .sp-actions button{flex:1;padding:.55em;border-radius:.6em;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);color:var(--txt)}
+  .sp-actions button span{font-size:.44em;font-weight:700;letter-spacing:.1em}
+  .sp-actions .danger{border-color:rgba(255,45,61,.5);color:#ff6b77}
+  .dbtn.sos.on{color:#ff6b77;border-color:rgba(255,45,61,.45);background:rgba(255,45,61,.1);box-shadow:0 0 1em rgba(255,45,61,.18)}
+  .dbtn.sos.alarm .st{display:block;background:var(--red);box-shadow:0 0 .5em var(--red);animation:pulse .6s infinite}
+
+  /* Crash countdown / SOS overlay */
+  .crash{position:absolute;inset:0;z-index:20;display:none;place-items:center;padding:1em;
+         background:radial-gradient(60% 80% at 50% 50%,rgba(130,0,18,.94),rgba(22,0,5,.97));backdrop-filter:blur(6px)}
+  .crash.show{display:grid}
+  .crash.sos{animation:sosbg 1s infinite}
+  @keyframes sosbg{50%{background:radial-gradient(60% 80% at 50% 50%,rgba(200,10,30,.95),rgba(40,0,8,.97))}}
+  .cr-box{display:flex;align-items:center;gap:1.5em;max-width:100%}
+  .cr-ring{position:relative;width:7.5em;height:7.5em;flex:none}
+  .cr-ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+  .cr-ring b{position:absolute;inset:0;display:grid;place-items:center;font-size:2.4em;font-weight:800}
+  .cr-tx{min-width:0}
+  .cr-tx h2{font-size:1.35em;font-weight:800;letter-spacing:.05em;line-height:1}
+  .cr-tx p{font-size:.66em;opacity:.9;margin:.35em 0 .8em}
+  .cr-actions{display:flex;flex-wrap:wrap;gap:.45em}
+  .cr-actions.hide,.cr-actions .hide{display:none!important}
+  .cr-actions button,.cr-actions a{display:inline-flex;align-items:center;justify-content:center;min-width:6em;height:2.5em;padding:0 1.2em;border-radius:1.25em;
+         font-size:.82em;font-weight:800;letter-spacing:.08em;text-decoration:none;color:#fff;border:2px solid rgba(255,255,255,.55);background:rgba(255,255,255,.06)}
+  .cr-actions .ok{background:var(--green);border-color:var(--green);color:#062312}
+  .cr-actions .red{background:#ff2d3d;border-color:#ff2d3d}
+  .cr-actions .big{font-size:1em;height:2.6em;padding:0 1.6em;box-shadow:0 0 1.6em rgba(255,45,61,.7);animation:callpulse 1.2s infinite}
+  @keyframes callpulse{50%{box-shadow:0 0 .4em rgba(255,45,61,.4)}}
+  #crStatus{display:block;margin-top:.8em;font-size:.44em;opacity:.9;line-height:1.4}
+
+  /* Destination search */
+  .search{position:absolute;left:50%;top:6%;transform:translateX(-50%);width:min(30em,70%);max-height:80%;z-index:8;padding:.6em;display:none;
+          flex-direction:column;gap:.45em;border-radius:1em;background:rgba(24,25,29,.96);border:1px solid var(--cy-dim);box-shadow:0 .8em 2.4em rgba(0,0,0,.6)}
+  .search.show{display:flex}
+  .search .row{display:flex;gap:.45em;align-items:center}
+  .search .field{flex:1;min-width:0;display:flex;align-items:center;gap:.5em;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);
+                 border-radius:.6em;padding:0 .7em;height:2.1em;color:var(--dim)}
+  .search .field:focus-within{border-color:var(--cy);color:var(--cy)}
+  .search input{flex:1;min-width:0;background:none;border:0;color:var(--txt);font:inherit;font-size:.6em;outline:none;user-select:text}
+  .search input::placeholder{color:var(--mute)}
+  .search .x{width:2.1em;height:2.1em;border-radius:.6em;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);display:grid;place-items:center;color:var(--dim)}
+  .search ul{list-style:none;padding:0;overflow:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.15) transparent}
+  .search li{padding:.5em .7em;border-radius:.5em;cursor:pointer;display:flex;align-items:center;gap:.6em}
+  .search li::before{content:"";width:.45em;height:.45em;border-radius:50%;background:var(--cy);flex:none;box-shadow:0 0 .4em var(--cy)}
+  .search li:hover,.search li:active{background:rgba(41,182,246,.1)}
+  .search li div{min-width:0}
+  .search li b{display:block;font-size:.56em;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .search li small{display:block;font-size:.42em;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .search .tip{font-size:.4em;color:var(--mute);padding:0 .4em;letter-spacing:.04em}
+
+  .hint{position:fixed;inset:0;background:var(--bg);display:none;place-items:center;text-align:center;z-index:9;padding:2em;color:var(--dim);
+        font:500 1.1rem/1.5 "Saira Semi Condensed",system-ui,sans-serif}
+  @media (orientation:portrait){.hint{display:grid}}
+  .toast{position:absolute;left:50%;top:26%;transform:translate(-50%,-.6em);z-index:9;pointer-events:none;display:flex;align-items:center;gap:.5em;
+         padding:.4em .95em;border-radius:1.2em;width:max-content;max-width:min(30em,72%);text-align:center;background:rgba(24,25,29,.95);border:1px solid var(--cy-dim);
+         box-shadow:0 .4em 1.4em rgba(0,0,0,.5);opacity:0;transition:opacity .25s,transform .25s}
+  .toast::before{content:"";width:.35em;height:.35em;border-radius:50%;background:var(--cy);box-shadow:0 0 .6em var(--cy)}
+  .toast span{font-size:.52em;font-weight:600;letter-spacing:.03em}
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+<div class="hint">Rotate your phone to landscape<br>and mount it on the handlebar.</div>
+
+<main class="screen" id="screen">
+  <div class="cluster" id="cluster">
+    <svg class="bezel" id="bezel"></svg>
+
+    <div class="mapwrap"><div id="map"></div></div>
+    <div class="dbg" id="dbg"></div>
+
+    <!-- Top: temperature · signal · next turn · signal · clock -->
+    <div class="topbar">
+      <span class="temp" id="temp">--°C</span>
+      <div class="sig" id="sigL" aria-label="Left turn signal"><svg viewBox="0 0 30 20"><path d="M0 10L11 0v6h19v8H11v6z"/></svg></div>
+      <div class="turn idle" id="turn">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path id="arrowPath"/></svg></div>
+        <div class="tx">
+          <small id="turnTxt">NO DESTINATION</small>
+          <b id="turnBig">Where to?</b>
+          <div class="st" id="street">Tap ROUTE or long-press the map</div>
+        </div>
+      </div>
+      <div class="sig" id="sigR" aria-label="Right turn signal"><svg viewBox="0 0 30 20"><path d="M30 10L19 0v6H0v8h19v6z"/></svg></div>
+      <span class="clock" id="clock" title="Full screen">--:--</span>
+    </div>
+
+    <!-- Left dial: distance ridden + route progress -->
+    <div class="gauge left">
+      <svg viewBox="0 0 200 200">
+        <use href="#dialBase"/>
+        <path id="lTrack" fill="none" stroke="#2a2c31" stroke-width="10"/>
+        <path id="lArc" fill="none" stroke="url(#cyGrad)" stroke-width="10" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100" filter="url(#arcGlow)"/>
+        <g id="lTicks" stroke="rgba(255,255,255,.22)" stroke-width="1.2"></g>
+        <circle cx="100" cy="100" r="70" fill="none" stroke="#6b3f25" stroke-width="1.6" opacity=".9"/>
+        <text class="g-lbl" x="100" y="66" text-anchor="middle">‹ TRIP ›</text>
+        <text class="g-num" id="dist" x="100" y="118" text-anchor="middle" style="font-size:50px">0.00</text>
+        <text class="g-unit" x="100" y="138" text-anchor="middle">KM</text>
+        <text class="g-sub" x="100" y="154" text-anchor="middle">AVG <tspan id="avg" fill="#f4f6f8">0.0</tspan> KM/H</text>
+      </svg>
+    </div>
+
+    <!-- Right dial: speed -->
+    <div class="gauge right" id="gaugeBox">
+      <svg viewBox="0 0 200 200">
+        <defs>
+          <g id="dialBase">
+            <circle cx="100" cy="100" r="99" fill="url(#dialGrad)"/>
+            <circle cx="100" cy="100" r="99" fill="none" stroke="rgba(255,255,255,.05)" stroke-width="1"/>
+          </g>
+          <radialGradient id="dialGrad" cx="50%" cy="45%" r="60%"><stop offset="0" stop-color="#1c1d21"/><stop offset=".8" stop-color="#141518"/><stop offset="1" stop-color="#101114"/></radialGradient>
+          <linearGradient id="cyGrad" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#1580c4"/><stop offset="1" stop-color="#46c8ff"/></linearGradient>
+          <filter id="arcGlow" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        </defs>
+        <use href="#dialBase"/>
+        <path id="track" fill="none" stroke="#2a2c31" stroke-width="10"/>
+        <path id="arc" fill="none" stroke="url(#cyGrad)" stroke-width="10" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100" filter="url(#arcGlow)"/>
+        <circle id="tip" r="0"/>
+        <g id="ticks" stroke="rgba(255,255,255,.22)" stroke-width="1.2"></g>
+        <circle cx="100" cy="100" r="70" fill="none" stroke="#6b3f25" stroke-width="1.6" opacity=".9"/>
+        <text class="g-lbl" id="modeLbl" x="100" y="66" text-anchor="middle">‹ SIM ›</text>
+        <text class="g-num spd" id="spd" x="100" y="120" text-anchor="middle" fill="#f4f6f8">0</text>
+        <text class="g-unit" x="100" y="138" text-anchor="middle">KM/H</text>
+        <rect class="brake-bg" x="80" y="146" width="40" height="13" rx="6.5"/>
+        <text class="brake" x="100" y="155.5" text-anchor="middle">BRAKE</text>
+      </svg>
+    </div>
+
+    <!-- Bottom center: elevation profile -->
+    <div class="elevrow">
+      <div class="chart" id="chart">
+        <svg viewBox="0 0 1000 100" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="ef" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#29b6f6" stop-opacity=".45"/><stop offset="1" stop-color="#29b6f6" stop-opacity="0"/>
+            </linearGradient>
+            <clipPath id="done"><rect id="doneRect" x="-5" y="-10" width="0" height="120"/></clipPath>
+          </defs>
+          <path id="eArea" fill="url(#ef)"/>
+          <path id="eLine" fill="none" stroke="#29b6f6" stroke-width="1.6" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+          <g clip-path="url(#done)">
+            <path id="eAreaDone" fill="#1c1d21"/>
+            <path id="eLineDone" fill="none" stroke="#555a63" stroke-width="1.4" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+          </g>
+        </svg>
+        <div class="cursor" id="eCursor"><div class="ln"></div><div class="dot" id="eDot"></div><div class="lbl" id="eLabel"></div></div>
+        <div class="empty" id="eEmpty">SET A DESTINATION TO SEE THE ELEVATION</div>
+      </div>
+      <div class="climb"><small>CLIMB</small><b id="climb">--</b></div>
+    </div>
+
+    <!-- Bottom center: trip -->
+    <div class="trip">
+      <span><i class="tag">TIME</i><b id="time">00:00</b></span>
+      <span class="mid"><i>REMAINING</i><b id="rem">--</b></span>
+      <span><i class="tag">ETA</i><b id="eta">--:--</b></span>
+    </div>
+
+    <!-- Bars: phone battery / road grade -->
+    <div class="bar left">
+      <div class="segs" id="battSegs"></div>
+      <svg class="i" viewBox="0 0 24 24"><rect x="3" y="7" width="16" height="10" rx="2"/><path d="M21 11v2"/></svg>
+      <b id="batt">--%</b>
+    </div>
+    <div class="bar right">
+      <div class="segs" id="gradeSegs"></div>
+      <svg class="i" viewBox="0 0 24 24"><path d="M3 19L10 8l4 6 3-4 4 9z"/></svg>
+      <b id="grade">--%</b>
+    </div>
+
+    <div class="salert" id="salert">
+      <div class="num"><span id="salertNum">30</span></div>
+      <div class="tx"><b id="salertTitle">High speed</b><small id="salertSub">You passed 30 km/h</small></div>
+    </div>
+    <button class="credits" id="credits" aria-label="Map and data credits">i</button>
+    <button class="recenter" id="recenter">
+      <svg class="i" viewBox="0 0 24 24"><path d="M12 3l7 18-7-4-7 4z"/></svg><span>RECENTER</span>
+    </button>
+
+    <div class="search" id="search">
+      <div class="row">
+        <label class="field">
+          <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+          <input id="q" placeholder="Search destination: street, place, neighborhood…" autocomplete="off">
+        </label>
+        <button class="x" id="closeSearch" aria-label="Close"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </div>
+      <ul id="results"></ul>
+      <div class="tip">Tip: long-press the map to set the destination there.</div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <nav class="dock">
+    <button class="dbtn" id="routeBtn"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg><span>ROUTE</span></button>
+    <button class="dbtn gps" id="gps"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg><span>GPS</span><i class="st"></i></button>
+    <button class="dbtn" id="simBtn"><svg class="i" viewBox="0 0 24 24"><path d="M4 18h16M7 18V9M12 18V5M17 18v-6"/></svg><span>SIMULATION</span></button>
+    <button class="dbtn" id="bit"><svg class="i" viewBox="0 0 24 24"><path d="M7 7l10 10-5 5V2l5 5L7 17"/></svg><span>BIT</span></button>
+    <button class="dbtn sos" id="sosBtn"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg><span>SOS</span><i class="st"></i></button>
+    <button class="dbtn" id="night"><svg class="i" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg><span>NIGHT</span></button>
+  </nav>
+
+  <div class="simpop" id="sim">
+    <div class="row"><span>AVERAGE SPEED</span><b><span id="simVal">20</span> <small>km/h</small></b></div>
+    <input type="range" id="simSpeed" min="0" max="50" step="1" value="20" aria-label="Simulation average speed">
+    <div class="ticks"><i style="left:0">0</i><i style="left:50%">25</i><i style="left:60%">30</i><i style="left:80%">40</i><i style="left:100%">50</i></div>
+  </div>
+
+  <!-- micro:bit menu -->
+  <div class="simpop bitpop" id="bitPop">
+    <div class="row"><span>MICRO:BIT</span><b id="bitState">disconnected</b></div>
+    <button class="pbtn" id="bitBle"><span>CONNECT VIA BLUETOOTH</span><small>real micro:bit (Chrome on Android)</small></button>
+    <button class="pbtn" id="bitVirtual"><span>VIRTUAL MICRO:BIT</span><small>test without the device</small></button>
+    <button class="pbtn hide" id="bitOff"><span>DISCONNECT</span></button>
+    <small class="note" id="bitNote"></small>
+  </div>
+
+  <!-- Virtual micro:bit: same logic and same messages as the real one -->
+  <div class="vmb" id="vmb">
+    <div class="vmb-head"><span>VIRTUAL MICRO:BIT</span><button id="vmbClose" aria-label="Close">✕</button></div>
+    <div class="board"><div class="matrix" id="vMatrix"></div></div>
+    <small class="vmb-note">Mounted on the rear of the bike · full square = brake (detected by the phone)</small>
+    <div class="vlog" id="vLog"></div>
+  </div>
+
+  <!-- SOS settings -->
+  <div class="sospanel" id="sosPanel">
+    <div class="sp-head"><span>CRASH DETECTION &amp; SOS</span><button id="sosClose" aria-label="Close">✕</button></div>
+    <label class="sw"><input type="checkbox" id="crashOn"><span>Crash detection</span><small id="crashState">off</small></label>
+    <div class="sp-grid">
+      <label><span>CONTACT NAME</span><input id="sosName" placeholder="e.g. Mom" autocomplete="off"></label>
+      <label><span>CONTACT PHONE</span><input id="sosPhone" placeholder="+55 11 91234-5678" inputmode="tel" autocomplete="off"></label>
+      <label><span>EMERGENCY NUMBER</span><input id="sosEmergency" placeholder="192" inputmode="tel" autocomplete="off"></label>
+      <label><span>ON SOS, CALL</span><select id="sosCallWho"><option value="emergency">Emergency number</option><option value="contact">My contact</option></select></label>
+    </div>
+    <small class="sp-note">If you crash and don't answer within 30 s, CicloAuto opens your <b>phone app</b> with the number ready to call,
+      and shows a button to text your location to your contact. Settings stay on this phone.</small>
+    <div class="sp-actions">
+      <button id="sosSimCrash" class="danger"><span>SIMULATE CRASH</span></button>
+    </div>
+  </div>
+
+  <!-- Crash countdown / SOS -->
+  <div class="crash" id="crash" role="alertdialog" aria-labelledby="crTitle">
+    <div class="cr-box">
+      <div class="cr-ring">
+        <svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="8"/>
+          <circle id="crRing" cx="60" cy="60" r="52" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"/></svg>
+        <b id="crCount">30</b>
+      </div>
+      <div class="cr-tx">
+        <h2 id="crTitle">CRASH DETECTED</h2>
+        <p id="crSub">Are you OK?</p>
+        <div class="cr-actions" id="crAsk">
+          <button class="ok" id="crOk">I'M OK</button>
+          <button class="red" id="crSend">SEND SOS NOW</button>
+        </div>
+        <div class="cr-actions hide" id="crSos">
+          <a class="red big" id="crCall" href="tel:192">CALL 192</a>
+          <a id="crSms" href="#">SMS MY LOCATION</a>
+          <button class="ok" id="crCancel">I'M OK · CANCEL</button>
+        </div>
+        <small id="crStatus"></small>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"><span id="toastTxt"></span></div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmtNum = (n,d=1) => n.toFixed(d);
+const pad = n => String(n).padStart(2,'0');
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const NS = 'http://www.w3.org/2000/svg';
+const MAX_SPEED = 50, BRAKE_ON = -3.5, BRAKE_OFF = -1.5;
+const START_POS = [-46.6566, -23.5614];   // start position without GPS (Av. Paulista, São Paulo)
+
+/* ======================= Map in CicloAuto style ======================= */
+// graphite panel palette (route in red, like a motorcycle dash)
+const C = {
+  bg:'rgba(0,0,0,0)', water:'#1c2530', park:'#1c231f', building:'#2a2c32',
+  path:'#34373e', cycle:'#2a6a85', minor:'#3a3e46', mid:'#4d525c', major:'#626873',
+  label:'#8b909a', halo:'#1d1e22', place:'#666b76'
+};
+const isClass = list => ['match', ['get','class'], list, true, false];
+const width = (a,b,c) => ['interpolate', ['exponential',1.5], ['zoom'], 12, a, 16, b, 19, c];
+const nameField = ['coalesce', ['get','name:en'], ['get','name']];
+const STYLE = {
+  version: 8,
+  glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
+  sources: { omt: { type:'vector', url:'https://tiles.openfreemap.org/planet',
+    attribution:'<a href="https://openfreemap.org">OpenFreeMap</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · Elevation <a href="https://open-meteo.com">Open-Meteo</a>' } },
+  layers: [
+    { id:'bg', type:'background', paint:{ 'background-color':C.bg } },
+    { id:'landcover', type:'fill', source:'omt', 'source-layer':'landcover',
+      filter: isClass(['grass','wood','farmland','wetland']), paint:{ 'fill-color':C.park, 'fill-opacity':.8 } },
+    { id:'park', type:'fill', source:'omt', 'source-layer':'park', paint:{ 'fill-color':C.park } },
+    { id:'water', type:'fill', source:'omt', 'source-layer':'water', paint:{ 'fill-color':C.water } },
+    { id:'waterway', type:'line', source:'omt', 'source-layer':'waterway', paint:{ 'line-color':C.water, 'line-width':1.5 } },
+    { id:'path', type:'line', source:'omt', 'source-layer':'transportation', minzoom:14,
+      filter:['all', isClass(['path']), ['!=', ['get','subclass'], 'cycleway']],
+      layout:{ 'line-cap':'round' }, paint:{ 'line-color':C.path, 'line-width':width(.5,1.2,3), 'line-dasharray':[2,1.5] } },
+    { id:'road-minor', type:'line', source:'omt', 'source-layer':'transportation',
+      filter: isClass(['minor','service','track','residential','living_street']),
+      layout:{ 'line-cap':'round','line-join':'round' }, paint:{ 'line-color':C.minor, 'line-width':width(.6,4,14) } },
+    { id:'road-mid', type:'line', source:'omt', 'source-layer':'transportation',
+      filter: isClass(['secondary','tertiary']),
+      layout:{ 'line-cap':'round','line-join':'round' }, paint:{ 'line-color':C.mid, 'line-width':width(1,6,20) } },
+    { id:'road-major', type:'line', source:'omt', 'source-layer':'transportation',
+      filter: isClass(['primary','trunk','motorway']),
+      layout:{ 'line-cap':'round','line-join':'round' }, paint:{ 'line-color':C.major, 'line-width':width(1.4,8,26) } },
+    { id:'cycleway', type:'line', source:'omt', 'source-layer':'transportation', minzoom:13,
+      filter:['==', ['get','subclass'], 'cycleway'],
+      layout:{ 'line-cap':'round','line-join':'round' }, paint:{ 'line-color':C.cycle, 'line-width':width(.8,2.5,6) } },
+    // low 3D buildings (25% of real height, max 25 m) so they don't hide the street
+    { id:'building-3d', type:'fill-extrusion', source:'omt', 'source-layer':'building', minzoom:15,
+      paint:{ 'fill-extrusion-color':C.building,
+              'fill-extrusion-height':['min', 25, ['*', .25, ['coalesce', ['get','render_height'], 6]]],
+              'fill-extrusion-base':['min', 25, ['*', .25, ['coalesce', ['get','render_min_height'], 0]]],
+              'fill-extrusion-opacity':.5 } },
+    { id:'road-label', type:'symbol', source:'omt', 'source-layer':'transportation_name', minzoom:14,
+      layout:{ 'symbol-placement':'line', 'text-field':nameField, 'text-font':['Noto Sans Regular'], 'text-size':11 },
+      paint:{ 'text-color':C.label, 'text-halo-color':C.halo, 'text-halo-width':1.4 } },
+    { id:'place-label', type:'symbol', source:'omt', 'source-layer':'place',
+      filter: isClass(['city','town','suburb','neighbourhood','quarter']),
+      layout:{ 'text-field':nameField, 'text-font':['Noto Sans Bold'], 'text-size':11, 'text-transform':'uppercase', 'text-letter-spacing':.12 },
+      paint:{ 'text-color':C.place, 'text-halo-color':C.halo, 'text-halo-width':1.4 } }
+  ]
+};
+
+const map = new maplibregl.Map({
+  container:'map', style:STYLE, center:START_POS, zoom:16.8, pitch:55, bearing:0,
+  attributionControl:false, maxPitch:65
+});
+// map credits live in our own "i" button (see #credits) instead of MapLibre's control
+
+const riderEl = document.createElement('div');
+riderEl.className = 'rider';
+riderEl.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 1.5l8.5 20-8.5-5-8.5 5z" fill="#29b6f6" stroke="#bfeaff" stroke-width=".8" stroke-linejoin="round"/></svg>';
+const rider = new maplibregl.Marker({ element:riderEl, rotationAlignment:'map', pitchAlignment:'viewport' }).setLngLat(START_POS).addTo(map);
+const destEl = document.createElement('div'); destEl.className = 'dest';
+const destMarker = new maplibregl.Marker({ element:destEl });
+
+const EMPTY = { type:'Feature', geometry:{ type:'LineString', coordinates:[] } };
+map.on('load', () => {
+  map.addSource('route', { type:'geojson', data:EMPTY, lineMetrics:true });
+  map.addLayer({ id:'route-glow', type:'line', source:'route', layout:{ 'line-cap':'round','line-join':'round' },
+    paint:{ 'line-color':'#ff2d3d', 'line-opacity':.3, 'line-width':width(8,22,40), 'line-blur':5 } }, 'road-label');
+  map.addLayer({ id:'route-line', type:'line', source:'route', layout:{ 'line-cap':'round','line-join':'round' },
+    paint:{ 'line-width':width(3,8,16),
+            'line-gradient':['interpolate', ['linear'], ['line-progress'], 0, '#ff2d3d', 1, '#ff6a5c'] } }, 'road-label');
+});
+// rider slightly below the middle, above the elevation strip
+function fitPadding(){ const h = map.getContainer().clientHeight; map.setPadding({ top: h * .5, bottom: h * .22, left:0, right:0 }); }
+map.on('resize', fitPadding); fitPadding();
+
+/* Follow the rider; dragging the map pauses it */
+let follow = true;
+map.on('dragstart', () => { follow = false; $('recenter').classList.add('show'); });
+$('recenter').onclick = () => { follow = true; $('recenter').classList.remove('show'); };
+
+/* ======================= Geometry ======================= */
+const rad = d => d*Math.PI/180, deg = r => r*180/Math.PI;
+function dist(a,b){
+  const dLat = rad(b[1]-a[1]), dLon = rad(b[0]-a[0]);
+  const h = Math.sin(dLat/2)**2 + Math.cos(rad(a[1]))*Math.cos(rad(b[1]))*Math.sin(dLon/2)**2;
+  return 2*6371000*Math.asin(Math.sqrt(h));
+}
+function bearing(a,b){
+  const y = Math.sin(rad(b[0]-a[0]))*Math.cos(rad(b[1]));
+  const x = Math.cos(rad(a[1]))*Math.sin(rad(b[1])) - Math.sin(rad(a[1]))*Math.cos(rad(b[1]))*Math.cos(rad(b[0]-a[0]));
+  return (deg(Math.atan2(y,x)) + 360) % 360;
+}
+const angDiff = (a,b) => ((b - a + 540) % 360) - 180;
+// move a [lng, lat] point by m meters towards heading h (degrees)
+const offset = (p, h, m) => [p[0] + m*Math.sin(rad(h)) / (111320*Math.cos(rad(p[1]))), p[1] + m*Math.cos(rad(h)) / 110540];
+
+let route = null;   // {coords, cum, total, steps, stepStart}
+function pointAt(d){
+  const {coords, cum} = route;
+  d = clamp(d, 0, route.total);
+  let i = 0;
+  while (i < cum.length-2 && cum[i+1] < d) i++;
+  const seg = cum[i+1] - cum[i] || 1, t = (d - cum[i]) / seg;
+  return [coords[i][0] + (coords[i+1][0]-coords[i][0])*t, coords[i][1] + (coords[i+1][1]-coords[i][1])*t];
+}
+function project(p){   // closest point on the route: distance along it and offset (m)
+  const {coords, cum} = route, kx = Math.cos(rad(p[1]))*111320, ky = 110540;
+  let best = { off:Infinity, d:0 };
+  for (let i = 0; i < coords.length-1; i++){
+    const ax=(coords[i][0]-p[0])*kx, ay=(coords[i][1]-p[1])*ky, bx=(coords[i+1][0]-p[0])*kx, by=(coords[i+1][1]-p[1])*ky;
+    const dx=bx-ax, dy=by-ay, L2=dx*dx+dy*dy, t = L2 ? clamp(-(ax*dx+ay*dy)/L2, 0, 1) : 0;
+    const off = Math.hypot(ax+t*dx, ay+t*dy);
+    if (off < best.off) best = { off, d: cum[i] + t*(cum[i+1]-cum[i]) };
+  }
+  return best;
+}
+
+/* ======================= Route (OSRM bike profile) ======================= */
+const ICONS = {
+  right:'M8 20V12h9M13 8l4 4-4 4', left:'M16 20V12H7M11 8l-4 4 4 4',
+  'slight-right':'M9 21v-6l7-7M11 8h5v5', 'slight-left':'M15 21v-6L8 8M13 8H8v5',
+  straight:'M12 21V4M7 9l5-5 5 5', uturn:'M8 20v-9a4 4 0 0 1 8 0v8M13 16l3 3 3-3',
+  roundabout:'M12 21v-5M12 16a4 4 0 1 1 4-4M16 12V7M13 9l3-3 3 3',
+  arrive:'M12 21s-6-5.5-6-10a6 6 0 0 1 12 0c0 4.5-6 10-6 10zM12 11h.01',
+  pin:'M12 21s-6-5.5-6-10a6 6 0 0 1 12 0c0 4.5-6 10-6 10zM12 11h.01'
+};
+const MODS = {
+  'left':['TURN LEFT','left'], 'right':['TURN RIGHT','right'],
+  'sharp left':['SHARP LEFT','left'], 'sharp right':['SHARP RIGHT','right'],
+  'slight left':['SLIGHT LEFT','slight-left'], 'slight right':['SLIGHT RIGHT','slight-right'],
+  'uturn':['MAKE A U-TURN','uturn'], 'straight':['GO STRAIGHT','straight']
+};
+const ordinal = n => n + (n % 100 >= 11 && n % 100 <= 13 ? 'TH' : ['TH','ST','ND','RD'][n % 10] || 'TH');
+function maneuver(step){
+  const m = step.maneuver, mod = m.modifier || 'straight';
+  if (m.type === 'arrive') return { txt:'DESTINATION', icon:'arrive', side:null };
+  if (m.type === 'roundabout' || m.type === 'rotary')
+    return { txt: m.exit ? `ROUNDABOUT · ${ordinal(m.exit)} EXIT` : 'ROUNDABOUT', icon:'roundabout', side:null };
+  if (m.type === 'exit roundabout' || m.type === 'exit rotary')
+    return { txt:'EXIT ROUNDABOUT', icon: step.driving_side === 'left' ? 'slight-left' : 'slight-right', side:null };
+  const [txt, icon] = MODS[mod] || MODS.straight;
+  const turning = ['turn','end of road','fork','on ramp','off ramp','merge','roundabout turn'].includes(m.type) && /^(sharp )?(left|right)$/.test(mod);
+  if ((m.type === 'new name' || m.type === 'continue') && !turning) return { txt:'CONTINUE', icon:'straight', side:null };
+  return { txt, icon, side: turning ? (mod.includes('left') ? 'L' : 'R') : null };
+}
+
+async function routeTo(dest){
+  closeSearch();
+  toast('Calculating bike route…');
+  const from = ride.pos;
+  const url = `https://routing.openstreetmap.de/routed-bike/route/v1/driving/${from[0]},${from[1]};${dest[0]},${dest[1]}?overview=full&geometries=geojson&steps=true`;
+  try {
+    const j = await (await fetch(url)).json();
+    if (j.code !== 'Ok' || !j.routes.length) throw new Error(j.code);
+    setRoute(j.routes[0]);
+    toast(`Route: ${fmtDist(route.total)}`);
+  } catch (e) { toast("Couldn't calculate the route"); }
+}
+function setRoute(rt){
+  const coords = rt.geometry.coordinates, cum = [0];
+  for (let i = 1; i < coords.length; i++) cum.push(cum[i-1] + dist(coords[i-1], coords[i]));
+  const steps = rt.legs[0].steps, stepStart = [0];
+  for (let i = 1; i < steps.length; i++) stepStart.push(stepStart[i-1] + steps[i-1].distance);
+  const k = cum[cum.length-1] / (stepStart[stepStart.length-1] || 1);   // align OSRM step distances with the geometry
+  route = { coords, cum, total: cum[cum.length-1], steps, stepStart: stepStart.map(s => s*k) };
+  route.signals = buildSignals(route);
+  ride.along = 0; arrived = false; nextIdx = -1; autoSig = null; autoSigDone = new Set(); lastRouteAt = Date.now();
+  if (!gps.pos) ride.pos = coords[0];
+  else matchRoute();   // GPS: place it on the new route now
+  destMarker.setLngLat(coords[coords.length-1]).addTo(map);
+  loadElevation();
+  drawRemaining(true);
+  follow = true; $('recenter').classList.remove('show');
+}
+let lastDraw = 0;
+function drawRemaining(force){
+  if (!route || !map.getSource('route')) return;
+  const now = performance.now();
+  if (!force && now - lastDraw < 900) return;
+  lastDraw = now;
+  const {coords, cum} = route;
+  let i = 0; while (i < cum.length-1 && cum[i] <= ride.along) i++;
+  const rest = [pointAt(ride.along), ...coords.slice(i)];
+  map.getSource('route').setData({ type:'Feature', geometry:{ type:'LineString', coordinates: rest.length > 1 ? rest : [] } });
+}
+
+/* Destination: search (Photon/OSM) or long-press on the map */
+function openSearch(){ $('search').classList.add('show'); $('routeBtn').classList.add('on'); setTimeout(() => $('q').focus(), 50); }
+function closeSearch(){ $('search').classList.remove('show'); $('routeBtn').classList.remove('on'); }
+$('routeBtn').onclick = () => $('search').classList.contains('show') ? closeSearch() : openSearch();
+$('closeSearch').onclick = closeSearch;
+let qTimer;
+$('q').oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(searchPlaces, 350); };
+async function searchPlaces(){
+  const q = $('q').value.trim(), ul = $('results');
+  if (q.length < 3){ ul.innerHTML = ''; return; }
+  try {
+    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=6&lang=en&lat=${ride.pos[1]}&lon=${ride.pos[0]}`;
+    const j = await (await fetch(url)).json();
+    ul.innerHTML = '';
+    for (const f of j.features){
+      const p = f.properties, li = document.createElement('li');
+      const title = p.name || [p.street, p.housenumber].filter(Boolean).join(', ');
+      const sub = [p.street && p.name ? p.street : '', p.district, p.city, p.state].filter(Boolean).join(' · ');
+      li.innerHTML = `<div><b></b><small></small></div>`;
+      li.querySelector('b').textContent = title; li.querySelector('small').textContent = sub;
+      li.onclick = () => routeTo(f.geometry.coordinates);
+      ul.appendChild(li);
+    }
+    if (!j.features.length) ul.innerHTML = '<li><small>Nothing found</small></li>';
+  } catch (e) { ul.innerHTML = '<li><small>Search unavailable (no connection)</small></li>'; }
+}
+map.on('contextmenu', e => routeTo([e.lngLat.lng, e.lngLat.lat]));
+let pressTimer;
+map.on('touchstart', e => {
+  if (e.originalEvent.touches.length !== 1) return;
+  const ll = e.lngLat; pressTimer = setTimeout(() => routeTo([ll.lng, ll.lat]), 650);
+});
+['touchend','touchmove','dragstart'].forEach(ev => map.on(ev, () => clearTimeout(pressTimer)));
+
+/* ======================= Speedometer ======================= */
+// round dials: 270° arc (open at the bottom, where the BRAKE pill sits)
+const CX = 100, CY = 100, R = 87, A0 = -135, SWEEP = 270;
+const pt = (a, r=R) => [CX + Math.sin(rad(a))*r, CY - Math.cos(rad(a))*r];
+const arcD = `M${pt(A0)} A${R} ${R} 0 1 1 ${pt(A0 + SWEEP)}`;
+for (const id of ['track','arc','lTrack','lArc']) $(id).setAttribute('d', arcD);
+for (const g of ['ticks','lTicks']) for (let i = 0; i <= 10; i++){
+  const a = A0 + SWEEP*i/10, [x1,y1] = pt(a, 79), [x2,y2] = pt(a, i%5 ? 75.5 : 73);
+  const l = document.createElementNS(NS,'line');
+  l.setAttribute('x1',x1); l.setAttribute('y1',y1); l.setAttribute('x2',x2); l.setAttribute('y2',y2);
+  $(g).appendChild(l);
+}
+
+/* ======================= Turn signals and brake ======================= */
+let brake = false, sig = '0', blink = true;
+function setSignal(l, notify = true){
+  sig = l; blink = true;
+  $('sigL').classList.toggle('active', l==='L'); $('sigR').classList.toggle('active', l==='R');
+  paintBlink();
+  if (notify) link.send('S' + l);          // mirror on the micro:bit
+}
+function paintBlink(){ for (const id of ['sigL','sigR']) $(id).classList.toggle('lit', blink); }
+setInterval(() => { blink = !blink; paintBlink(); }, 360);
+$('sigL').onclick = () => setSignal(sig==='L' ? '0' : 'L');
+$('sigR').onclick = () => setSignal(sig==='R' ? '0' : 'R');
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key==='ArrowLeft') $('sigL').click();
+  if (e.key==='ArrowRight') $('sigR').click();
+});
+function setBrake(on){ if (on !== brake){ brake = on; $('gaugeBox').classList.toggle('braking', on); link.send(on ? 'B1' : 'B0'); } }
+
+/* ======================= Dock buttons ======================= */
+$('night').onclick = e => { e.currentTarget.classList.toggle('on'); $('screen').classList.toggle('night'); };
+$('bit').onclick = () => $('bitPop').classList.toggle('open');
+function toast(msg, ms = 1800){ const t=$('toast'); $('toastTxt').textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'), ms); }
+$('credits').onclick = () => toast('© OpenStreetMap contributors · OpenFreeMap · OSRM · Open-Meteo · Photon', 5000);
+$('clock').onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.();
+// keep the screen on (Chrome/Android)
+let wake = null;
+async function keepAwake(){ try { if (!wake && navigator.wakeLock) { wake = await navigator.wakeLock.request('screen'); wake.onrelease = () => wake = null; } } catch(e){} }
+addEventListener('pointerdown', keepAwake);
+document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && keepAwake());
+
+/* ======================= GPS: speed in m/s -> km/h ======================= */
+const gps = { watchId:null, kmh:0, ms:0, last:0, time:0, pos:null, heading:null, along:0, off:Infinity, onRoute:false,
+              roadDir:null, acc:null, speedSrc:'-', posAt:0, dropped:0, started:0 };
+const GPS_MAX_ACCURACY_M = 50;   // fixes less precise than this don't move the marker (inside a car accuracy often drops)
+const GPS_MAX_JUMP_KMH = 150;    // ignore fixes that would mean an impossible speed
+const GPS_MIN_HEADING_MS = 2;    // below ~7 km/h the GPS course is noise: keep the last heading
+const ON_ROUTE_M = 25;           // closer than this to the route: snap the marker to the road...
+const ON_ROUTE_DEG = 45;         // ...but only if we're heading the same way as the road (else it's a crossing street)
+const gpsOn = () => gps.watchId !== null;                          // GPS mode (never falls back to the simulation)
+const gpsFresh = () => gpsOn() && Date.now() - gps.last < 6000;    // recent fix
+let offCount = 0, lastRouteAt = 0;
+function onPositionUpdate(p){
+  const c = p.coords, fix = [c.longitude, c.latitude];
+  const time = p.timestamp || Date.now(), first = !gps.pos;
+  const reported = c.speed != null && !isNaN(c.speed);
+  // any fix means the GPS is alive (even an imprecise one): no "lost signal" flicker
+  gps.last = Date.now(); gps.acc = c.accuracy;
+  let moved = 0, dtS = 0;
+  if (!first){
+    dtS = (time - gps.time) / 1000;
+    if (dtS <= 0) return;                                   // repeated (cached) fix
+    moved = dist(gps.pos, fix);
+    const imprecise = c.accuracy > GPS_MAX_ACCURACY_M;
+    const impossible = Math.max(0, moved - c.accuracy) / dtS * 3.6 > GPS_MAX_JUMP_KMH;   // allow for the fix's own error
+    if (imprecise || impossible){
+      // don't move the marker, but the speed the GPS reports is still good
+      gps.dropped++;
+      if (reported){ gps.ms = c.speed; gps.kmh = Math.round(c.speed * 3.6); gps.speedSrc = 'gps'; }
+      return;
+    }
+  }
+  // speed: the GPS reports it in m/s; when it doesn't (null on many phones), derive it from the distance between fixes
+  const speed_ms = reported ? c.speed : (first ? 0 : gps.ms * .4 + (moved / dtS) * .6);
+  gps.ms = speed_ms;
+  gps.kmh = Math.round(speed_ms * 3.6);
+  gps.speedSrc = reported ? 'gps' : 'calc';
+  // heading: only trust it while actually moving (when stopped, GPS drift points in random directions)
+  if (speed_ms >= GPS_MIN_HEADING_MS){
+    if (c.heading != null && !isNaN(c.heading)) gps.heading = c.heading;
+    else if (moved > 5) gps.heading = bearing(gps.pos, fix);
+  }
+  gps.pos = fix; gps.time = time; gps.posAt = Date.now();
+  if (first){ ride.pos = fix; follow = true; toast('GPS connected'); loadTemp(); }
+  // off the route? reroute
+  if (route && !arrived){
+    matchRoute();
+    const wrongWay = gps.ms >= GPS_MIN_HEADING_MS && gps.heading != null && gps.off < 40 && !gps.onRoute;   // near it, but on another street
+    offCount = gps.off > 40 || wrongWay ? offCount + 1 : 0;
+    if (offCount >= 2 && Date.now() - lastRouteAt > 10000){
+      lastRouteAt = Date.now(); offCount = 0;
+      routeTo(route.coords[route.coords.length-1]);
+    }
+  }
+}
+// place the GPS fix on the route. It only counts as "on the route" if it's close AND going the same way as the road;
+// otherwise a crossing street near an intersection would snap the marker 90° off.
+function matchRoute(){
+  const pr = project(gps.pos);
+  gps.along = pr.d; gps.off = pr.off; ride.along = pr.d;
+  gps.roadDir = bearing(pointAt(pr.d), pointAt(pr.d + 15));
+  const sameWay = gps.heading == null || gps.ms < GPS_MIN_HEADING_MS || Math.abs(angDiff(gps.heading, gps.roadDir)) <= ON_ROUTE_DEG;
+  gps.onRoute = pr.off < ON_ROUTE_M && sameWay;
+}
+function startWatch(){
+  if (gps.watchId !== null) navigator.geolocation.clearWatch(gps.watchId);
+  gps.started = Date.now();
+  // no "timeout": when stopped, the phone may go a long time without a new fix, and that's normal
+  gps.watchId = navigator.geolocation.watchPosition(onPositionUpdate, err => {
+    if (err.code === 1){ stopGps(); toast('Location permission denied'); }
+    // code 2/3 (signal lost for a moment): keep the GPS on; the watchdog below restarts it if it stalls
+  }, { enableHighAccuracy:true, maximumAge:1000 });
+}
+function stopGps(){
+  if (gps.watchId !== null) navigator.geolocation.clearWatch(gps.watchId);
+  gps.watchId = null; gps.pos = null; gps.dropped = 0;
+  $('gps').classList.remove('on','weak');
+}
+$('gps').onclick = () => {
+  if (gpsOn()){ stopGps(); $('sim').classList.remove('hide'); $('simBtn').classList.remove('hide'); toast('GPS off, back to simulation'); return; }
+  if (!navigator.geolocation){ toast('GPS unavailable'); return; }
+  toast('Searching for GPS…'); $('gps').classList.add('on');
+  startWatch();
+  $('sim').classList.add('hide'); $('simBtn').classList.add('hide');
+};
+// Passive GPS: it only waits for updates. It restarts only after 5 min without any fix
+// (restarting may make the phone ask for permission again).
+const GPS_RESTART_MS = 5 * 60 * 1000;
+setInterval(() => {
+  if (!gpsOn()) return;
+  $('gps').classList.toggle('weak', !gpsFresh());
+  const sinceLastFix = Date.now() - Math.max(gps.last, gps.started);
+  if (sinceLastFix > GPS_RESTART_MS) startWatch();
+}, 2000);
+
+/* ======================= Navigation ======================= */
+const ride = { pos: START_POS.slice(), heading: 0, along: 0 };
+const S = { speed:0, dist:0, elapsed:0, accel:0 };
+let arrived = false, nextIdx = -1, lastNav = 0;
+// Automatic turn signal. Each route gets a list of signal windows {on, off, side} (meters along the route):
+//   turns:       on SIGNAL_BEFORE_M before the turn, off SIGNAL_AFTER_M after it
+//   roundabouts: on up to ROUNDABOUT_SIGNAL_M before your exit (never before entering), off SIGNAL_AFTER_M after it,
+//                on the exit side (right where traffic drives on the right, as in Brazil)
+const SIGNAL_BEFORE_M = 50, SIGNAL_AFTER_M = 10, ROUNDABOUT_SIGNAL_M = 25;
+let autoSig = null;           // window that switched the signal on
+let autoSigDone = new Set();  // windows already used (won't re-trigger if the rider cancels)
+function buildSignals(r){
+  const out = [];
+  r.steps.forEach((step, i) => {
+    if (i === 0) return;
+    const m = step.maneuver, at = r.stepStart[i];
+    if (m.type === 'roundabout' || m.type === 'rotary'){
+      // this step is the ride inside the roundabout: it ends at your exit
+      const exitAt = i + 1 < r.steps.length ? r.stepStart[i + 1] : r.total;
+      out.push({ on: Math.max(at, exitAt - ROUNDABOUT_SIGNAL_M), off: exitAt + SIGNAL_AFTER_M, side: step.driving_side === 'left' ? 'L' : 'R' });
+    } else {
+      const side = maneuver(step).side;
+      if (side) out.push({ on: at - SIGNAL_BEFORE_M, off: at + SIGNAL_AFTER_M, side });
+    }
+  });
+  return out.map((w, id) => ({ id, ...w }));
+}
+function autoSignal(){
+  if (autoSig && ride.along >= autoSig.off){
+    if (sig === autoSig.side) setSignal('0');   // only switch off if it's still the signal the app turned on
+    autoSig = null;
+  }
+  const w = route.signals.find(w => ride.along >= w.on && ride.along < w.off && !autoSigDone.has(w.id));
+  if (w){ autoSig = w; autoSigDone.add(w.id); setSignal(w.side); }
+}
+const fmtDist = m => m < 1000 ? `${Math.round(m/10)*10} m` : `${fmtNum(m/1000)} km`;
+
+function nextManeuver(){
+  if (!route) return null;
+  for (let i = 1; i < route.steps.length; i++)
+    if (route.stepStart[i] > ride.along + 3) return { i, d: route.stepStart[i] - ride.along, ...maneuver(route.steps[i]) };
+  return null;
+}
+/* ======================= Elevation profile (Open-Meteo) ======================= */
+let elev = null;   // {route, d[], h[], Y(h)}
+async function loadElevation(){
+  elev = null; resetElevation('LOADING ELEVATION…');
+  const r = route; if (!r) return;
+  const N = clamp(Math.round(r.total / 40), 20, 100);   // 1 point every ~40 m (max 100 per request)
+  const d = Array.from({ length:N }, (_, i) => r.total * i / (N-1));
+  const pts = d.map(pointAt);
+  const url = 'https://api.open-meteo.com/v1/elevation?latitude=' + pts.map(p => p[1].toFixed(5)).join(',') +
+              '&longitude=' + pts.map(p => p[0].toFixed(5)).join(',');
+  try {
+    const raw = (await (await fetch(url)).json()).elevation;
+    if (route !== r || !raw || raw.length !== N) return;
+    const h = raw.map((v, i) => (raw[Math.max(0,i-1)] + 2*v + raw[Math.min(N-1,i+1)]) / 4);   // smooth out noise
+    const lo = Math.min(...h) - 4, hi = Math.max(Math.max(...h) + 4, lo + 30);            // minimum scale of 30 m
+    const X = v => v / r.total * 1000, Y = v => 96 - (v - lo) / (hi - lo) * 84;
+    const line = d.map((v, i) => `${i ? 'L' : 'M'}${X(v).toFixed(1)},${Y(h[i]).toFixed(1)}`).join('');
+    const area = line + 'L1000,100L0,100Z';
+    $('eLine').setAttribute('d', line); $('eLineDone').setAttribute('d', line);
+    $('eArea').setAttribute('d', area); $('eAreaDone').setAttribute('d', area);
+    elev = { route:r, d, h, Y };
+    $('eEmpty').style.display = 'none'; $('chart').classList.add('has');
+    updateElevation();
+  } catch (e) { if (route === r) resetElevation('ELEVATION UNAVAILABLE'); }
+}
+function resetElevation(msg){
+  for (const id of ['eLine','eLineDone','eArea','eAreaDone']) $(id).setAttribute('d', '');
+  $('chart').classList.remove('has'); $('eEmpty').style.display = ''; $('eEmpty').textContent = msg;
+  $('climb').textContent = '--';
+  $('grade').textContent = '--%'; fillSegs('gradeSegs', 0);
+}
+function elevAt(x){
+  const { d, h } = elev; x = clamp(x, 0, d[d.length-1]);
+  let i = 0; while (i < d.length-2 && d[i+1] < x) i++;
+  return h[i] + (h[i+1] - h[i]) * (x - d[i]) / (d[i+1] - d[i]);
+}
+function updateElevation(){
+  if (!elev || elev.route !== route) return;
+  const p = clamp(ride.along / route.total, 0, 1), alt = elevAt(ride.along);
+  $('doneRect').setAttribute('width', p * 1000 + 5);
+  $('eCursor').style.left = (p * 100) + '%';
+  $('eCursor').classList.toggle('start', p < .12);   // keep the label inside the chart
+  $('eCursor').classList.toggle('flip', p > .88);
+  $('eDot').style.top = elev.Y(alt) + '%';
+  const a = Math.min(ride.along, route.total - 60);                 // grade over the next 60 m
+  const grade = Math.round((elevAt(a + 60) - elevAt(a)) / 60 * 100);
+  $('grade').textContent = `${grade > 0 ? '+' : ''}${grade}%`;          // grade bar (0 to 12%)
+  fillSegs('gradeSegs', clamp(grade, 0, 12) / 12, grade >= 8 ? 'crit' : grade >= 5 ? 'warn' : '');
+  $('eLabel').textContent = `${Math.round(alt)} m · ${grade > 0 ? '+' : ''}${grade}%`;
+  let climb = 0, prev = alt;                                          // climb still ahead
+  for (let i = 0; i < elev.d.length; i++) if (elev.d[i] > ride.along){ climb += Math.max(0, elev.h[i] - prev); prev = elev.h[i]; }
+  $('climb').textContent = `↑${Math.round(climb)} m`;
+}
+
+function updateNav(){
+  updateElevation();
+  if (route){
+    if (arrived && autoSig){ if (sig === autoSig.side) setSignal('0'); autoSig = null; }
+    else if (!arrived) autoSignal();
+  }
+  const box = $('turn');
+  if (!route){
+    box.className = 'turn idle';
+    $('arrowPath').setAttribute('d', ICONS.pin);
+    $('turnTxt').textContent = 'NO DESTINATION'; $('turnBig').textContent = 'Where to?';
+    $('street').textContent = 'Tap ROUTE or long-press the map';
+    $('rem').textContent = '--'; return;
+  }
+  if (arrived){
+    box.className = 'turn done';
+    $('arrowPath').setAttribute('d', ICONS.arrive);
+    $('turnTxt').textContent = 'DESTINATION'; $('turnBig').textContent = 'You have arrived!'; $('street').textContent = '';
+    $('rem').textContent = '0 m'; return;
+  }
+  box.className = 'turn';
+  const n = nextManeuver();
+  if (n){
+    const [v, u] = fmtDist(n.d).split(' ');
+    $('arrowPath').setAttribute('d', ICONS[n.icon]);
+    $('turnTxt').textContent = n.txt;
+    $('turnBig').innerHTML = `${v} <span>${u}</span>`;
+    $('street').textContent = route.steps[n.i].name || route.steps[n.i].ref || '';
+    if (n.i !== nextIdx) nextIdx = n.i;
+  }
+  $('rem').textContent = fmtDist(Math.max(0, route.total - ride.along));
+}
+
+/* ======================= Loop ======================= */
+let last = performance.now(), t = 0;
+function tick(now){
+  const realDt = Math.min((now-last)/1000, 5);   // real time (counts distance/time)
+  const dt = Math.min(realDt, .25); last = now;  // capped step (smoothing)
+  if (dt > 0){
+    t += realDt;
+    const real = gpsOn();
+    let target = 0;
+    if (real) target = gpsFresh() ? gps.kmh : 0;   // no recent fix: probably stopped
+    else if (!arrived){
+      // simulation: oscillates ±15% around the average set on the slider
+      target = simAvg * (1 + .12*Math.sin(t/5) + .03*Math.sin(t*1.3));
+      const n = route && nextManeuver();          // slow down before turns
+      if (n && (n.side || n.icon === 'roundabout')) target *= clamp(n.d / 70, .45, 1);
+    }
+    const prev = S.speed;
+    S.speed += (target - S.speed) * Math.min(1, dt*(real ? 4 : 1.5));
+    S.accel += ((S.speed-prev)/dt - S.accel) * Math.min(1, dt*3);
+    if (S.accel < BRAKE_ON) setBrake(true); else if (S.accel > BRAKE_OFF) setBrake(false);
+    S.dist += S.speed/3600*realDt; if (S.speed > .5) S.elapsed += realDt;
+
+    // position and heading
+    let hTarget = ride.heading;
+    if (real){
+      if (gps.pos){   // waiting for the first fix: stay still, no simulation
+        // predict where we are now (fixes arrive ~1 per second), so the marker doesn't trail behind
+        const ahead = gpsFresh() ? Math.min((Date.now() - gps.posAt) / 1000, 3) * gps.ms : 0;
+        let target;
+        if (route && !arrived && gps.onRoute){
+          // on the route: keep the marker on the road and point along it
+          ride.along = Math.min(route.total, gps.along + ahead);
+          target = pointAt(ride.along);
+          if (gps.ms >= GPS_MIN_HEADING_MS) hTarget = bearing(target, pointAt(ride.along + 15));
+        } else {
+          target = offset(gps.pos, gps.heading ?? ride.heading, ahead);
+          if (gps.heading != null) hTarget = gps.heading;
+        }
+        const k = Math.min(1, dt * 6);
+        ride.pos = [ride.pos[0] + (target[0] - ride.pos[0]) * k, ride.pos[1] + (target[1] - ride.pos[1]) * k];
+      }
+    } else if (route && !arrived){
+      ride.along = Math.min(route.total, ride.along + S.speed/3.6*realDt);
+      ride.pos = pointAt(ride.along);
+      hTarget = bearing(ride.pos, pointAt(ride.along + 15));
+    } else if (!route){   // no route: keep going straight on the current heading
+      ride.pos = offset(ride.pos, ride.heading, S.speed/3.6*realDt);
+    }
+    if (route && !arrived && route.total - ride.along < 12){ arrived = true; toast('You have reached your destination!'); }
+    ride.heading = (ride.heading + angDiff(ride.heading, hTarget) * Math.min(1, dt*3) + 360) % 360;
+
+    rider.setLngLat(ride.pos).setRotation(ride.heading);
+    if (follow) map.jumpTo({ center: ride.pos, bearing: ride.heading, pitch: 55, zoom: 17.3 - clamp(S.speed/40, 0, 1)*1.2 });
+    drawRemaining(false);
+    if (now - lastNav > 250){ lastNav = now; updateNav(); }
+
+    checkSpeedAlert(S.speed);
+    const v = Math.min(1, S.speed/MAX_SPEED);
+    $('spd').textContent = Math.round(S.speed);
+    $('arc').setAttribute('stroke-dashoffset', 100 - v*100);
+    $('arc').style.opacity = v > .01 ? 1 : 0;
+    // left dial: km ridden + route progress ring
+    $('dist').textContent = fmtNum(S.dist, S.dist < 10 ? 2 : 1);
+    $('lArc').setAttribute('stroke-dashoffset', 100 - (route ? clamp(ride.along/route.total, 0, 1) : 0)*100);
+    $('time').textContent = pad(Math.floor(S.elapsed/60)) + ':' + pad(Math.floor(S.elapsed%60));
+    $('avg').textContent = fmtNum(S.elapsed > 2 ? S.dist/(S.elapsed/3600) : 0);
+  }
+  requestAnimationFrame(tick);
+}
+/* ======================= Simulation: average speed ======================= */
+let simAvg = 20;
+function setSim(v){
+  simAvg = +v;
+  $('simVal').textContent = simAvg;
+  $('simSpeed').style.setProperty('--p', (simAvg / 50 * 100) + '%');
+}
+$('simSpeed').oninput = e => setSim(e.target.value);
+setSim($('simSpeed').value);
+
+/* ======================= Speed alerts ======================= */
+const ALERTS = [
+  { v:25, color:'#e0a800', title:'Watch your speed', sub:'You passed 25 km/h' },
+  { v:30, color:'#ff8a00', title:'High speed',       sub:'You passed 30 km/h' },
+  { v:40, color:'#ff5a1f', title:'Very high speed',  sub:'You passed 40 km/h' },
+  { v:50, color:'#ff2d46', title:'Slow down!',       sub:'You passed 50 km/h' },
+];
+const HYSTERESIS = 2;        // speed must drop 2 km/h below the threshold to re-arm the alert
+let alertLevel = 0;         // highest threshold currently exceeded (0 = none)
+function checkSpeedAlert(v){
+  let lvl = 0;
+  for (const a of ALERTS) if (v >= a.v || (alertLevel >= a.v && v >= a.v - HYSTERESIS)) lvl = a.v;
+  if (lvl > alertLevel) showSpeedAlert(ALERTS.find(a => a.v === lvl));
+  if (lvl !== alertLevel){
+    alertLevel = lvl;
+    const a = ALERTS.find(x => x.v === lvl);
+    $('spd').style.fill = a ? a.color : '';             // speedometer number and arc in the level color
+    $('arc').style.stroke = a ? a.color : '';
+  }
+}
+function showSpeedAlert(a){
+  const el = $('salert');
+  el.style.setProperty('--c', a.color);
+  $('salertNum').textContent = a.v; $('salertTitle').textContent = a.title; $('salertSub').textContent = a.sub;
+  el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+  clearTimeout(el._h); el._h = setTimeout(() => el.classList.remove('show'), 3500);
+  const n = ALERTS.indexOf(a) + 1;                   // 1 to 4 beeps/vibrations depending on the level
+  vibrate(Array.from({ length: n*2 - 1 }, (_, i) => i % 2 ? 90 : 160));
+  beep(n);
+}
+// vibration, only after the first tap (browsers block it before that)
+const vibrate = p => { if (navigator.userActivation?.hasBeenActive !== false) navigator.vibrate?.(p); };
+// short beep (browsers only allow sound after the first tap on the screen)
+let audio = null;
+addEventListener('pointerdown', () => { try { audio ??= new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch(e){} });
+function beep(n){
+  if (!audio || audio.state !== 'running') return;
+  for (let i = 0; i < n; i++){
+    const o = audio.createOscillator(), g = audio.createGain(), t0 = audio.currentTime + i*.18;
+    o.type = 'sine'; o.frequency.value = 880 + i*110;
+    g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(.25, t0 + .01); g.gain.exponentialRampToValueAtTime(.001, t0 + .13);
+    o.connect(g).connect(audio.destination); o.start(t0); o.stop(t0 + .14);
+  }
+}
+
+// GPS diagnostics: tap the temperature to show/hide
+$('temp').onclick = () => { $('dbg').classList.toggle('show'); updateDebug(); };
+function updateDebug(){
+  if (!$('dbg').classList.contains('show')) return;
+  const deg = v => v == null ? '--' : Math.round((v + 360) % 360) + '°';
+  const age = gps.last ? ((Date.now() - gps.last) / 1000).toFixed(1) + ' s' : '--';
+  $('dbg').textContent = [
+    `GPS      ${gpsOn() ? (gpsFresh() ? 'on' : 'on (no fix)') : 'off'}  · fix age ${age}  · acc ${gps.acc == null ? '--' : Math.round(gps.acc) + ' m'}  · dropped ${gps.dropped}`,
+    `speed    ${gps.kmh} km/h (${gps.speedSrc})  · shown ${Math.round(S.speed)} km/h`,
+    `course   GPS ${deg(gps.heading)}  · road ${deg(route ? gps.roadDir : null)}  · map ${deg(ride.heading)}`,
+    `route    ${route ? (gps.onRoute ? 'on route' : 'off route') + ` · ${isFinite(gps.off) ? Math.round(gps.off) + ' m' : '--'} away` : 'none'}`,
+  ].join('\n');
+}
+setInterval(updateDebug, 500);
+
+function slow(){
+  const d = new Date(); $('clock').textContent = pad(d.getHours())+':'+pad(d.getMinutes());
+  $('sim').classList.toggle('hide', gpsOn());   // slider only in simulation
+  $('simBtn').classList.toggle('hide', gpsOn());
+  $('modeLbl').textContent = gpsOn() ? '‹ GPS ›' : '‹ SIM ›';
+  if (route && !arrived){
+    const rem = route.total - ride.along, v = Math.max(S.elapsed > 30 ? S.dist/(S.elapsed/3600) : 0, 15);
+    const e = new Date(Date.now() + rem/1000/v*3600000);
+    $('eta').textContent = pad(e.getHours())+':'+pad(e.getMinutes());
+  } else $('eta').textContent = '--:--';
+}
+
+/* ======================= micro:bit bridge (virtual or Bluetooth) ======================= */
+// Protocol (one message per line):
+//   app -> micro:bit: SL / SR / S0 = left / right / signals off · B1 / B0 = brake on / off · H1 / H0 = hazard (crash/SOS) on / off
+//   micro:bit -> app: SL / SR / S0 (A/B buttons, for testing in the MakeCode simulator)
+const link = {
+  mode: null, rx: null, dev: null, queue: Promise.resolve(),
+  send(msg){
+    if (this.mode === 'virtual') vmb.receive(msg);
+    else if (this.mode === 'ble' && this.rx){
+      const data = new TextEncoder().encode(msg + '\n');
+      this.queue = this.queue.then(() => this.rx.writeValue(data)).catch(() => {});   // one write at a time
+    }
+  }
+};
+function onMicrobitMessage(msg){
+  msg = msg.trim();
+  if (msg === 'SL' || msg === 'L') setSignal('L', false);
+  else if (msg === 'SR' || msg === 'R') setSignal('R', false);
+  else if (msg === 'S0' || msg === '0') setSignal('0', false);
+}
+function setLinkMode(mode){
+  link.mode = mode;
+  if (!mode) link.rx = null;
+  $('bit').classList.toggle('on', !!mode);
+  $('bitState').textContent = mode === 'virtual' ? 'virtual' : mode === 'ble' ? 'connected' : 'disconnected';
+  $('bitBle').classList.toggle('hide', !!mode); $('bitVirtual').classList.toggle('hide', !!mode); $('bitOff').classList.toggle('hide', !mode);
+  if (mode){ link.send('S' + sig); link.send(brake ? 'B1' : 'B0'); link.send(hazard ? 'H1' : 'H0'); }   // sync the current state
+}
+
+// Real Bluetooth (Web Bluetooth, micro:bit UART service)
+const UART    = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const UART_TX = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';   // micro:bit -> phone
+const UART_RX = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';   // phone -> micro:bit
+async function connectBLE(){
+  $('bitPop').classList.remove('open');
+  if (!navigator.bluetooth){ toast('Bluetooth unavailable here: use Chrome on Android'); return; }
+  try {
+    toast('Looking for the micro:bit…');
+    const dev = await navigator.bluetooth.requestDevice({ filters:[{ namePrefix:'BBC micro:bit' }], optionalServices:[UART] });
+    const svc = await (await dev.gatt.connect()).getPrimaryService(UART);
+    const tx = await svc.getCharacteristic(UART_TX);
+    link.rx = await svc.getCharacteristic(UART_RX);
+    let buf = ''; const dec = new TextDecoder();
+    tx.addEventListener('characteristicvaluechanged', e => {
+      buf += dec.decode(e.target.value);
+      let i; while ((i = buf.indexOf('\n')) >= 0){ const m = buf.slice(0, i); buf = buf.slice(i + 1); if (m.trim()) onMicrobitMessage(m); }
+    });
+    await tx.startNotifications();
+    dev.addEventListener('gattserverdisconnected', () => { if (link.mode === 'ble'){ setLinkMode(null); toast('micro:bit disconnected'); } });
+    link.dev = dev; vmb.close(); setLinkMode('ble'); toast('micro:bit connected');
+  } catch (e) { if (e.name !== 'NotFoundError') toast("Couldn't connect to the micro:bit"); }
+}
+$('bitBle').onclick = connectBLE;
+$('bitVirtual').onclick = () => { $('bitPop').classList.remove('open'); vmb.open(); setLinkMode('virtual'); toast('Virtual micro:bit connected'); };
+$('bitOff').onclick = () => {
+  $('bitPop').classList.remove('open');
+  if (link.mode === 'ble') link.dev?.gatt?.disconnect();
+  vmb.close(); setLinkMode(null); toast('micro:bit disconnected');
+};
+$('bitNote').textContent = navigator.bluetooth
+  ? 'In MakeCode, enable "No Pairing Required" in the project settings.'
+  : 'This browser has no Web Bluetooth. Use Chrome on Android for the real micro:bit.';
+
+// Virtual micro:bit: runs the same logic as microbit/rear-light.ts (LED matrix only)
+const vmb = (() => {
+  const FR = {   // signal frames (same as rear-light.ts), 5 rows of 5
+    R: ['#.....#.....#...#...#....', '.#.....#.....#...#...#...', '..#.....#.....#...#...#..'],
+    L: ['....#...#...#.....#.....#', '...#...#...#.....#.....#.', '..#...#...#.....#.....#..'],
+  };
+  const leds = [];
+  for (let i = 0; i < 25; i++) leds.push($('vMatrix').appendChild(document.createElement('i')));
+  let isOpen = false, signal = 0, frame = 0, brakeOn = false, hazardOn = false, logs = [];
+  const draw = p => leds.forEach((e, i) => e.classList.toggle('on', p[i] === '#'));
+  function log(txt){ logs = [txt, ...logs].slice(0, 3); $('vLog').innerHTML = logs.join('<br>'); }
+  function receive(msg){
+    log(`<b>app → micro:bit</b> ${msg}`);
+    if (msg === 'SR' || msg === 'R'){ signal = 1; frame = 0; }
+    else if (msg === 'SL' || msg === 'L'){ signal = -1; frame = 0; }
+    else if (msg === 'S0' || msg === '0') signal = 0;
+    else if (msg === 'B1') brakeOn = true;
+    else if (msg === 'B0') brakeOn = false;
+    else if (msg === 'H1'){ hazardOn = true; frame = 0; }
+    else if (msg === 'H0') hazardOn = false;
+  }
+  $('vmbClose').onclick = () => { close(); if (link.mode === 'virtual') setLinkMode(null); };
+  setInterval(() => {   // same pace as the micro:bit (130 ms); brake has priority over the signal
+    if (!isOpen) return;
+    if (hazardOn){ draw(frame % 2 ? '' : '#'.repeat(25)); frame++; }   // hazard: full square flashing
+    else if (brakeOn) draw('#'.repeat(25));
+    else if (signal){ draw(frame < 3 ? FR[signal > 0 ? 'R' : 'L'][frame] : ''); frame = (frame + 1) % 4; }
+    else draw('');
+  }, 130);
+  function open(){ isOpen = true; $('vmb').classList.add('open'); }
+  function close(){ isOpen = false; $('vmb').classList.remove('open'); }
+  return { open, close, receive };
+})();
+
+/* ======================= Cluster: bezel, battery, temperature ======================= */
+// bezel drawn for the current screen size: two circles + a center body, merged with a "gooey" filter
+function layout(){
+  const el = $('cluster'), W = el.clientWidth, H = el.clientHeight;
+  if (!W || !H) return;
+  const fs = parseFloat(getComputedStyle($('screen')).fontSize);
+  const rg = Math.min(H*.40, W*.155), lx = rg*1.25, rx = W - lx, cy = H*.46;
+  const set = (k, v) => el.style.setProperty(k, v + 'px');
+  set('--rg', rg); set('--lx', lx); set('--rx', rx); set('--gy', cy);
+  const mapl = lx + rg*.55;
+  set('--mapl', mapl); set('--mapr', mapl); set('--mapt', H*.09); set('--mapb', H*.075);
+  const tripy = H*.075;
+  set('--topy', H*.07); set('--tripy', tripy); set('--elevy', tripy + fs*1.4);
+  set('--bary', cy + rg + (H*.965 - cy - rg)*.32 - fs*.4);
+  const shapes = k => `
+    <circle cx="${lx}" cy="${cy}" r="${rg*1.1 - k}"/><circle cx="${rx}" cy="${cy}" r="${rg*1.1 - k}"/>
+    <rect x="${lx}" y="${H*.035 + k}" width="${rx - lx}" height="${H*.93 - 2*k}" rx="${H*.16}"/>
+    <rect x="${lx - rg*.85 + k}" y="${cy}" width="${rx - lx + rg*1.7 - 2*k}" height="${H*.965 - cy - k}" rx="${rg*.4}"/>`;
+  const goo = (id, glow) => `<filter id="${id}" x="-10%" y="-15%" width="120%" height="130%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="${rg*.13}" result="b"/>
+      <feColorMatrix in="b" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 24 -10" result="g"/>
+      ${glow ? `<feGaussianBlur in="g" stdDeviation="${rg*.045}" result="gl"/><feMerge><feMergeNode in="gl"/><feMergeNode in="g"/></feMerge>` : ''}
+    </filter>`;
+  const b = $('bezel');
+  b.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  b.innerHTML = `<defs>${goo('gooGlow', true)}${goo('goo', false)}
+      <linearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#25272c"/><stop offset="1" stop-color="#18191c"/></linearGradient>
+      <linearGradient id="rimGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1f8fd0"/><stop offset=".5" stop-color="#3fc3ff"/><stop offset="1" stop-color="#1f8fd0"/></linearGradient>
+    </defs>
+    <g filter="url(#gooGlow)" fill="url(#rimGrad)">${shapes(0)}</g>
+    <g filter="url(#goo)" fill="url(#bodyGrad)">${shapes(2.6)}</g>`;
+  map.resize(); fitPadding();
+}
+addEventListener('resize', layout);
+layout();
+
+// segmented bars
+function fillSegs(id, frac, cls = ''){
+  const s = $(id), on = Math.round(clamp(frac, 0, 1) * s.children.length);
+  [...s.children].forEach((e, i) => e.classList.toggle('on', i < on));
+  s.className = 'segs ' + cls;
+}
+for (const id of ['battSegs','gradeSegs']) $(id).innerHTML = '<i></i>'.repeat(12);
+
+// phone battery (Chrome/Android)
+navigator.getBattery?.().then(bat => {
+  const up = () => { const p = Math.round(bat.level*100); $('batt').textContent = p + '%'; fillSegs('battSegs', bat.level, p <= 15 ? 'crit' : p <= 30 ? 'warn' : ''); };
+  up(); bat.addEventListener('levelchange', up);
+}).catch(() => {});
+
+// current local temperature (Open-Meteo), every 15 min
+async function loadTemp(){
+  try {
+    const [lon, lat] = ride.pos;
+    const j = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&current=temperature_2m`)).json();
+    const t = Math.round(j.current.temperature_2m);
+    $('temp').textContent = `${t > 0 ? '+' : ''}${t}°C`;
+  } catch (e) {}
+}
+loadTemp(); setInterval(loadTemp, 15*60*1000);
+
+// SIMULATION button opens the slider
+$('simBtn').onclick = () => { const open = $('sim').classList.toggle('open'); $('simBtn').classList.toggle('on', open); };
+
+/* ======================= Crash detection & SOS ======================= */
+// A crash = a hard impact while riding, followed by the bike staying (almost) stopped.
+// Then a countdown asks "Are you OK?"; with no answer, the phone app opens with the SOS number ready to call.
+const CRASH = {
+  IMPACT_G: 3.5,          // impact strength (in g) measured by the phone's accelerometer
+  MIN_SPEED_KMH: 10,      // must have been riding at least this fast in the last 5 s
+  STILL_KMH: 5,           // ...and be below this speed after the impact
+  STILL_SECONDS: 6,       // how long to wait before deciding it was a crash
+  COUNTDOWN_S: 30,        // time to answer "I'M OK" before the call starts
+};
+const SOS_KEY = 'cicloauto.sos';
+const sosCfg = (() => {
+  const def = { on: false, name: '', phone: '', emergency: '192', callWho: 'emergency' };
+  try { return { ...def, ...JSON.parse(localStorage.getItem(SOS_KEY) || '{}') }; } catch (e) { return def; }
+})();
+function saveSosCfg(){ try { localStorage.setItem(SOS_KEY, JSON.stringify(sosCfg)); } catch (e) {} }
+
+// settings panel
+const sosFields = { sosName: 'name', sosPhone: 'phone', sosEmergency: 'emergency', sosCallWho: 'callWho' };
+for (const [id, key] of Object.entries(sosFields)){
+  $(id).value = sosCfg[key];
+  $(id).oninput = $(id).onchange = () => { sosCfg[key] = $(id).value.trim(); saveSosCfg(); };
+}
+$('crashOn').checked = sosCfg.on;
+$('sosBtn').onclick = () => $('sosPanel').classList.toggle('open');
+$('sosClose').onclick = () => $('sosPanel').classList.remove('open');
+$('crashOn').onchange = async () => {
+  if ($('crashOn').checked && typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function'){
+    try { if (await DeviceMotionEvent.requestPermission() !== 'granted') $('crashOn').checked = false; } catch (e) { $('crashOn').checked = false; }
+  }
+  sosCfg.on = $('crashOn').checked; saveSosCfg(); paintSosState();
+  toast(sosCfg.on ? 'Crash detection on' : 'Crash detection off');
+};
+$('sosSimCrash').onclick = () => { $('sosPanel').classList.remove('open'); startCountdown(); };
+
+let sensorSeen = false;
+function paintSosState(){
+  $('sosBtn').classList.toggle('on', sosCfg.on);
+  $('crashState').textContent = !sosCfg.on ? 'off' : sensorSeen ? 'on · sensor OK' : 'on · waiting for motion sensor';
+}
+paintSosState();
+
+// recent max speed (to know the rider was actually moving before the impact)
+const speedLog = [];
+setInterval(() => { speedLog.push([Date.now(), S.speed]); while (speedLog.length && Date.now() - speedLog[0][0] > 5000) speedLog.shift(); }, 250);
+const recentMaxSpeed = () => speedLog.reduce((m, [, v]) => Math.max(m, v), 0);
+
+const crash = { state: 'idle', end: 0, timer: null, lastSec: -1 };
+addEventListener('devicemotion', e => {
+  const a = e.accelerationIncludingGravity;
+  if (!a || a.x == null) return;
+  if (!sensorSeen){ sensorSeen = true; paintSosState(); }
+  if (!sosCfg.on || crash.state !== 'idle') return;
+  const g = Math.hypot(a.x, a.y, a.z) / 9.81;
+  if (g >= CRASH.IMPACT_G && recentMaxSpeed() >= CRASH.MIN_SPEED_KMH){
+    crash.state = 'checking';   // hard impact while riding: wait to see if the bike stops
+    setTimeout(() => {
+      if (crash.state !== 'checking') return;
+      if (S.speed <= CRASH.STILL_KMH) startCountdown(); else crash.state = 'idle';   // kept riding: just a pothole
+    }, CRASH.STILL_SECONDS * 1000);
+  }
+});
+
+function startCountdown(){
+  if (crash.state === 'countdown' || crash.state === 'sos') return;
+  crash.state = 'countdown'; crash.end = Date.now() + CRASH.COUNTDOWN_S * 1000; crash.lastSec = -1;
+  $('crash').className = 'crash show';
+  $('crTitle').textContent = 'CRASH DETECTED';
+  $('crSub').textContent = `Are you OK? Calling ${sosTarget().label} in ${CRASH.COUNTDOWN_S} seconds.`;
+  $('crAsk').classList.remove('hide'); $('crSos').classList.add('hide'); $('crStatus').textContent = '';
+  setHazard(true);
+  clearInterval(crash.timer);
+  crash.timer = setInterval(() => {
+    const left = Math.max(0, (crash.end - Date.now()) / 1000), sec = Math.ceil(left);
+    $('crCount').textContent = sec;
+    $('crRing').setAttribute('stroke-dashoffset', 100 - left / CRASH.COUNTDOWN_S * 100);
+    if (sec !== crash.lastSec){ crash.lastSec = sec; beep(1); vibrate(400); }
+    if (left <= 0) triggerSos();
+  }, 200);
+}
+
+// who to call: the emergency number (default 192) or the saved contact
+function sosTarget(){
+  const contact = sosCfg.phone.replace(/[^\d+]/g, ''), emergency = (sosCfg.emergency || '192').replace(/[^\d+]/g, '');
+  if (sosCfg.callWho === 'contact' && contact) return { number: contact, label: (sosCfg.name || 'my contact') };
+  return { number: emergency, label: emergency };
+}
+// opens the phone app with the number ready (the browser never completes a call by itself)
+let dial = number => { location.href = 'tel:' + number; };
+
+function triggerSos(){
+  clearInterval(crash.timer);
+  crash.state = 'sos';
+  const t = sosTarget(), contact = sosCfg.phone.replace(/[^\d+]/g, '');
+  $('crash').className = 'crash show sos';
+  $('crTitle').textContent = 'SOS ACTIVE';
+  $('crSub').textContent = `Opening the phone app to call ${t.label}…`;
+  $('crCount').textContent = 'SOS'; $('crRing').setAttribute('stroke-dashoffset', 0);
+  $('crAsk').classList.add('hide'); $('crSos').classList.remove('hide');
+  $('crCall').href = 'tel:' + t.number;
+  $('crCall').textContent = 'CALL ' + t.label.toUpperCase();
+  $('crSms').href = `sms:${contact}?body=${encodeURIComponent(sosMessage())}`;
+  $('crSms').classList.toggle('hide', !contact);
+  $('crStatus').textContent = "If the phone app didn't open, tap CALL.";
+  $('sosBtn').classList.add('alarm');
+  setHazard(true);
+  stopSiren();          // no siren over the phone call
+  dial(t.number);
+}
+
+function cancelCrash(){
+  const wasSos = crash.state === 'sos';
+  clearInterval(crash.timer);
+  crash.state = 'idle';
+  $('crash').className = 'crash';
+  $('sosBtn').classList.remove('alarm');
+  stopSiren(); setHazard(false);
+  toast(wasSos ? 'SOS cancelled' : 'Glad you are OK!');
+}
+$('crOk').onclick = cancelCrash;
+$('crCancel').onclick = cancelCrash;
+$('crSend').onclick = triggerSos;
+$('crCall').onclick = () => stopSiren();
+// back from the phone app with SOS still on: sound the siren so people nearby notice
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && crash.state === 'sos') startSiren(); });
+
+function sosMessage(){
+  const [lon, lat] = gps.pos || ride.pos;
+  return `CicloAuto SOS: possible bike crash. Location: https://maps.google.com/?q=${lat.toFixed(6)},${lon.toFixed(6)}`;
+}
+
+// siren: sweeping tone (stops while calling)
+let siren = null;
+function startSiren(){
+  if (siren || !audio || audio.state !== 'running') return;
+  const o = audio.createOscillator(), g = audio.createGain();
+  o.type = 'sawtooth'; g.gain.value = .18; o.connect(g).connect(audio.destination); o.start();
+  let up = true;
+  const sweep = () => { const t = audio.currentTime; o.frequency.cancelScheduledValues(t); o.frequency.setValueAtTime(up ? 700 : 1300, t); o.frequency.linearRampToValueAtTime(up ? 1300 : 700, t + .6); up = !up; };
+  sweep();
+  siren = { o, g, timer: setInterval(sweep, 600) };
+}
+function stopSiren(){
+  if (!siren) return;
+  clearInterval(siren.timer); try { siren.o.stop(); } catch (e) {}
+  siren = null; vibrate(0);
+}
+
+// rear micro:bit flashes as a hazard light during the countdown and SOS
+let hazard = false;
+function setHazard(on){ if (on !== hazard){ hazard = on; link.send(on ? 'H1' : 'H0'); } }
+
+setInterval(slow, 1000); slow(); updateNav(); requestAnimationFrame(tick);
+</script>
+</body>
+</html>

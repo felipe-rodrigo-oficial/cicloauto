@@ -1,0 +1,9 @@
+# Kivy / Buildozer (old Android version)
+android/.buildozer/
+android/bin/
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+Thumbs.db

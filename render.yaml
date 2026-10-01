@@ -1,0 +1,19 @@
+# Render Blueprint: publishes CicloAuto as a static site (free HTTPS)
+services:
+  - type: web
+    name: cicloauto
+    runtime: static
+    buildCommand: echo "no build step"
+    staticPublishPath: .
+    headers:
+      # the page changes often: always fetch the latest version
+      - path: /index.html
+        name: Cache-Control
+        value: no-cache
+      - path: /
+        name: Cache-Control
+        value: no-cache
+      # allow GPS and battery on the page itself
+      - path: /*
+        name: Permissions-Policy
+        value: geolocation=(self), battery=(self)
