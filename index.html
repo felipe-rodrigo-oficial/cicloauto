@@ -765,6 +765,72 @@ addEventListener('keydown', e => {
 });
 function setBrake(on){ if (on !== brake){ brake = on; $('gaugeBox').classList.toggle('braking', on); link.send(on ? 'B1' : 'B0'); } }
 
+/* Faster brake light: three sources, any of them turns it on
+ *   smooth: the smoothed speedometer (works in simulation; slowest)
+ *   gps:    speed drop between two GPS fixes, applied the moment the fix arrives (~1 s)
+ *   imu:    the phone's accelerometer along the bike's forward axis (~0.3 s). The phone can be mounted
+ *           in any position, so the forward axis is learned by comparing the accelerometer with
+ *           speed changes confirmed by the GPS; until it's learned, the accelerometer isn't used. */
+const BRAKE = {
+  GPS_MS2: 1.0,       // speed drop between fixes that means braking (m/s², ≈ 3.6 km/h per second)
+  IMU_MS2: 1.8,       // deceleration on the accelerometer that means braking (m/s²)
+  IMU_MS: 200,        // ...sustained for this long (road bumps are shorter)
+  IMU_TAU: .12,       // accelerometer smoothing time constant (s): filters road vibration
+  HOLD_MS: 700,       // keep the light on at least this long (no flicker)
+  LEARN_SAMPLES: 25,  // accelerometer samples needed to learn the forward axis
+};
+const brakeSrc = { smooth: false, gps: false, imu: false };
+let brakeHoldUntil = 0;
+function updateBrake(){ setBrake(brakeSrc.smooth || brakeSrc.gps || brakeSrc.imu || Date.now() < brakeHoldUntil); }
+
+// gps source: called for every fix that reports its own speed
+function gpsSpeedSample(ms, time){
+  if (gps.prevMs != null && time > gps.prevT && time - gps.prevT <= 3000){
+    const a = (ms - gps.prevMs) / ((time - gps.prevT) / 1000);
+    gps.accelMs2 = a; gps.accelAt = Date.now();
+    if (a <= -BRAKE.GPS_MS2 && gps.prevMs > 1.5){ brakeSrc.gps = true; brakeHoldUntil = Date.now() + BRAKE.HOLD_MS; }
+    else if (a > -0.3) brakeSrc.gps = false;
+    updateBrake();
+  }
+  gps.prevMs = ms; gps.prevT = time;
+}
+
+// imu source
+const imu = { lin: [0, 0, 0], grav: null, fwd: [0, 0, 0], n: 0, decelSince: 0, along: 0, t: 0 };
+const dot3 = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const norm3 = a => { const l = Math.hypot(...a) || 1; return a.map(v => v / l); };
+addEventListener('devicemotion', e => {
+  if (!gpsOn()) return;
+  let a = e.acceleration && e.acceleration.x != null ? [e.acceleration.x, e.acceleration.y, e.acceleration.z] : null;
+  if (!a){   // no gravity-free reading: remove gravity with a slow low-pass
+    const g = e.accelerationIncludingGravity; if (!g || g.x == null) return;
+    const raw = [g.x, g.y, g.z];
+    imu.grav = imu.grav ? imu.grav.map((v, i) => v + (raw[i] - v) * .02) : raw;
+    a = raw.map((v, i) => v - imu.grav[i]);
+  }
+  // smooth out road vibration; time-based, so it reacts the same at 20 or 100 samples per second
+  const now0 = performance.now(), dts = imu.t ? Math.min((now0 - imu.t) / 1000, .2) : .016;
+  imu.t = now0;
+  const k = 1 - Math.exp(-dts / BRAKE.IMU_TAU);
+  imu.lin = imu.lin.map((v, i) => v + (a[i] - v) * k);
+  // learn the forward axis while the GPS confirms we're speeding up or slowing down
+  const ga = gps.accelMs2;
+  if (ga != null && Date.now() - gps.accelAt < 1500 && Math.abs(ga) > .6 && Math.hypot(...imu.lin) > .3){
+    imu.fwd = imu.fwd.map((v, i) => v + imu.lin[i] * Math.sign(ga) * .05);
+    imu.n++;
+  }
+  if (imu.n < BRAKE.LEARN_SAMPLES) return;
+  imu.along = dot3(imu.lin, norm3(imu.fwd));   // + speeding up, - slowing down (m/s²)
+  const now = Date.now();
+  if (imu.along <= -BRAKE.IMU_MS2 && S.speed > 5){
+    if (!imu.decelSince) imu.decelSince = now;
+    if (now - imu.decelSince >= BRAKE.IMU_MS && !brakeSrc.imu){ brakeSrc.imu = true; brakeHoldUntil = now + BRAKE.HOLD_MS; updateBrake(); }
+  } else {
+    imu.decelSince = 0;
+    if (brakeSrc.imu && imu.along > -.8){ brakeSrc.imu = false; updateBrake(); }
+  }
+});
+
 /* ======================= Dock buttons ======================= */
 $('night').onclick = e => { e.currentTarget.classList.toggle('on'); $('screen').classList.toggle('night'); };
 $('bit').onclick = () => $('bitPop').classList.toggle('open');
@@ -804,7 +870,7 @@ function onPositionUpdate(p){
     if (imprecise || impossible){
       // don't move the marker, but the speed the GPS reports is still good
       gps.dropped++;
-      if (reported){ gps.ms = c.speed; gps.kmh = Math.round(c.speed * 3.6); gps.speedSrc = 'gps'; }
+      if (reported){ gps.ms = c.speed; gps.kmh = Math.round(c.speed * 3.6); gps.speedSrc = 'gps'; gpsSpeedSample(c.speed, time); }
       return;
     }
   }
@@ -813,6 +879,7 @@ function onPositionUpdate(p){
   gps.ms = speed_ms;
   gps.kmh = Math.round(speed_ms * 3.6);
   gps.speedSrc = reported ? 'gps' : 'calc';
+  if (reported) gpsSpeedSample(speed_ms, time);   // derived speeds are too noisy for the brake
   // heading: only trust it while actually moving (when stopped, GPS drift points in random directions)
   if (speed_ms >= GPS_MIN_HEADING_MS){
     if (c.heading != null && !isNaN(c.heading)) gps.heading = c.heading;
@@ -851,7 +918,7 @@ function startWatch(){
 }
 function stopGps(){
   if (gps.watchId !== null) navigator.geolocation.clearWatch(gps.watchId);
-  gps.watchId = null; gps.pos = null; gps.dropped = 0;
+  gps.watchId = null; gps.pos = null; gps.dropped = 0; gps.prevMs = null; brakeSrc.gps = brakeSrc.imu = false;
   $('gps').classList.remove('on','weak');
 }
 $('gps').onclick = () => {
@@ -1018,9 +1085,10 @@ function tick(now){
       if (n && (n.side || n.icon === 'roundabout')) target *= clamp(n.d / 70, .45, 1);
     }
     const prev = S.speed;
-    S.speed += (target - S.speed) * Math.min(1, dt*(real ? 4 : 1.5));
+    S.speed += (target - S.speed) * Math.min(1, dt*(real ? 8 : 1.5));
     S.accel += ((S.speed-prev)/dt - S.accel) * Math.min(1, dt*3);
-    if (S.accel < BRAKE_ON) setBrake(true); else if (S.accel > BRAKE_OFF) setBrake(false);
+    brakeSrc.smooth = S.accel < BRAKE_ON ? true : S.accel > BRAKE_OFF ? false : brakeSrc.smooth;
+    updateBrake();
     S.dist += S.speed/3600*realDt; if (S.speed > .5) S.elapsed += realDt;
 
     // position and heading
@@ -1136,6 +1204,7 @@ function updateDebug(){
     `speed    ${gps.kmh} km/h (${gps.speedSrc})  · shown ${Math.round(S.speed)} km/h`,
     `course   GPS ${deg(gps.heading)}  · road ${deg(route ? gps.roadDir : null)}  · map ${deg(ride.heading)}`,
     `route    ${route ? (gps.onRoute ? 'on route' : 'off route') + ` · ${isFinite(gps.off) ? Math.round(gps.off) + ' m' : '--'} away` : 'none'}`,
+    `brake    ${brake ? 'ON' : 'off'} [${Object.keys(brakeSrc).filter(k => brakeSrc[k]).join('+') || '-'}]  · imu ${imu.n >= BRAKE.LEARN_SAMPLES ? 'ready ' + imu.along.toFixed(1) + ' m/s²' : 'learning ' + imu.n + '/' + BRAKE.LEARN_SAMPLES}`,
   ].join('\n');
 }
 setInterval(updateDebug, 500);
