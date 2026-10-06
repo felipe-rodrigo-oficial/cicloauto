@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1b1c1f">
+<title>CicloAuto · micro:bit rear light</title>
+<meta name="description" content="Download the CicloAuto program for the micro:bit V2: turn signals, brake light and SOS, controlled by your phone over Bluetooth.">
+<link rel="icon" type="image/png" href="../icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Semi+Condensed:wght@400;500;600;700;800&display=swap">
+<style>
+  :root{
+    --bg:#1b1c1f; --card:#222428; --line:#2e3137;
+    --cy:#29b6f6; --cy2:#6fd6ff; --txt:#f4f6f8; --dim:#8b9099; --red:#ff2d3d;
+  }
+  *{box-sizing:border-box;margin:0}
+  html,body{background:var(--bg);color:var(--txt);font-family:"Saira Semi Condensed",Roboto,system-ui,sans-serif}
+  body{min-height:100vh;background:radial-gradient(80% 60% at 50% 0%, #26282d 0%, var(--bg) 70%) no-repeat, var(--bg)}
+  main{max-width:760px;margin:0 auto;padding:48px 20px 56px}
+  a{color:var(--cy2)}
+
+  .brand{display:flex;align-items:center;gap:14px;margin-bottom:36px;text-decoration:none;color:inherit}
+  .brand img{width:52px;height:52px;border-radius:12px}
+  .brand b{font-size:30px;font-weight:700;letter-spacing:.01em}
+  .brand small{display:block;font-size:12px;font-weight:600;letter-spacing:.2em;color:var(--cy)}
+
+  .hero{display:grid;grid-template-columns:1fr auto;gap:32px;align-items:center}
+  h1{font-size:clamp(30px,6vw,44px);line-height:1.05;font-weight:800}
+  h1 span{color:var(--cy)}
+  .lead{margin-top:14px;font-size:18px;line-height:1.5;color:#c9ced6}
+
+  /* 5x5 matrix: the same arrow animation as the micro:bit */
+  .board{background:#15171b;border:1px solid var(--line);border-radius:18px;padding:22px}
+  .matrix{display:grid;grid-template-columns:repeat(5,18px);gap:10px}
+  .matrix i{width:18px;height:18px;border-radius:4px;background:#3a1414}
+  .matrix i.on{background:var(--red);box-shadow:0 0 14px var(--red),0 0 4px #fff inset}
+
+  .dl{margin-top:34px;display:flex;flex-wrap:wrap;align-items:center;gap:14px 20px}
+  .btn{display:inline-flex;align-items:center;gap:12px;padding:16px 28px;border-radius:999px;
+       background:var(--cy);color:#06202c;font-size:19px;font-weight:700;letter-spacing:.02em;text-decoration:none;
+       box-shadow:0 8px 30px rgba(41,182,246,.35);transition:transform .15s, box-shadow .15s}
+  .btn:hover{transform:translateY(-2px);box-shadow:0 12px 36px rgba(41,182,246,.45)}
+  .btn:focus-visible{outline:3px solid var(--cy2);outline-offset:3px}
+  .btn svg{width:22px;height:22px}
+  .meta{font-size:14px;color:var(--dim);line-height:1.5}
+
+  section{margin-top:48px}
+  h2{font-size:14px;font-weight:700;letter-spacing:.18em;color:var(--cy);margin-bottom:16px}
+  ol.steps{list-style:none;padding:0;display:grid;gap:12px;counter-reset:s}
+  ol.steps li{counter-increment:s;display:grid;grid-template-columns:36px 1fr;gap:14px;align-items:start;
+              background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;font-size:16px;line-height:1.5}
+  ol.steps li::before{content:counter(s);display:grid;place-items:center;width:32px;height:32px;border-radius:50%;
+              background:rgba(41,182,246,.14);color:var(--cy);font-weight:700}
+  code{font-family:ui-monospace,Consolas,monospace;font-size:.92em;background:#15171b;border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+
+  table{width:100%;border-collapse:collapse;font-size:15px}
+  th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:600;font-size:13px;letter-spacing:.08em}
+  td:first-child{white-space:nowrap;font-weight:600}
+
+  .more{display:flex;flex-wrap:wrap;gap:10px}
+  .more a{padding:10px 18px;border-radius:999px;border:1px solid var(--line);background:var(--card);
+          color:var(--txt);text-decoration:none;font-weight:600;font-size:15px}
+  .more a:hover{border-color:var(--cy);color:var(--cy2)}
+  footer{margin-top:56px;font-size:13px;color:var(--dim);line-height:1.6}
+
+  @media (max-width:600px){
+    main{padding-top:32px}
+    .hero{grid-template-columns:1fr}
+    .board{justify-self:start}
+    td:first-child{white-space:normal}
+  }
+  @media (prefers-reduced-motion:reduce){ .btn{transition:none} }
+</style>
+</head>
+<body>
+<main>
+  <a class="brand" href="../"><img src="../icon-192.png" alt=""><div><b>CicloAuto</b><small>NAVIGATION &amp; SIGNALING FOR CYCLISTS</small></div></a>
+
+  <div class="hero">
+    <div>
+      <h1>Rear light for the <span>micro:bit V2</span></h1>
+      <p class="lead">Turn signals, brake light and SOS on the micro:bit's LED matrix, controlled by your phone over Bluetooth. No soldering, no wiring.</p>
+    </div>
+    <div class="board" aria-hidden="true"><div class="matrix" id="matrix"></div></div>
+  </div>
+
+  <div class="dl">
+    <a class="btn" href="cicloauto-rear-v2.hex" download>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg>
+      Download .hex
+    </a>
+    <p class="meta">cicloauto-rear-v2.hex · 1.4 MB<br>For micro:bit V2 (also runs on V1, without sound)</p>
+  </div>
+
+  <section>
+    <h2>HOW TO INSTALL</h2>
+    <ol class="steps">
+      <li><div>Plug the micro:bit into your computer with a USB cable. It shows up as a drive called <code>MICROBIT</code>.</div></li>
+      <li><div>Drag <code>cicloauto-rear-v2.hex</code> onto that drive. The yellow LED blinks while it copies.</div></li>
+      <li><div>When it's done, a dim dot blinks in the center of the screen: the micro:bit is waiting for your phone.</div></li>
+      <li><div>On an Android phone, open the <a href="../">CicloAuto app</a> in Chrome, tap the micro:bit icon and then <b>Connect micro:bit</b>. It shows ✔ and beeps.</div></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>WHAT IT DOES</h2>
+    <table>
+      <thead><tr><th>FROM THE APP</th><th>ON THE MICRO:BIT</th></tr></thead>
+      <tbody>
+        <tr><td>Turn ahead</td><td>"&lt;" or "&gt;" arrow running to the side of the turn, with a soft "tick" on the speaker</td></tr>
+        <tr><td>Braking</td><td>Whole matrix lit. With a signal on, the arrow stays bright over a dimmed square</td></tr>
+        <tr><td>Crash / SOS</td><td>Whole matrix flashing fast, plus a siren</td></tr>
+        <tr><td>Buttons A / B</td><td>Left / right signal by hand (A+B turns it off), for testing</td></tr>
+        <tr><td>Touch the logo</td><td>Sound on / off</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>MORE</h2>
+    <div class="more">
+      <a href="../">Open the app</a>
+      <a href="https://github.com/felipe-rodrigo-oficial/cicloauto/tree/main/microbit" target="_blank" rel="noopener">Source code (MakeCode)</a>
+    </div>
+  </section>
+
+  <footer>
+    Want to edit it? Open <a href="https://makecode.microbit.org" target="_blank" rel="noopener">makecode.microbit.org</a> and import the .hex file.
+    In the project settings, keep <b>"No Pairing Required"</b> on, or the app can't connect.
+  </footer>
+</main>
+
+<script>
+  // the same frames and pace (130 ms) as the micro:bit program: ">" runs right, then blank
+  const R = ['#.....#.....#...#...#....', '.#.....#.....#...#...#...', '..#.....#.....#...#...#..', ''];
+  const m = document.getElementById('matrix');
+  const leds = Array.from({ length: 25 }, () => m.appendChild(document.createElement('i')));
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let f = 0;
+  const draw = p => leds.forEach((l, i) => l.classList.toggle('on', p[i] === '#'));
+  if (still) draw(R[1]);
+  else setInterval(() => { draw(R[f]); f = (f + 1) % 4; }, 130);
+</script>
+</body>
+</html>

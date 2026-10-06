@@ -16,7 +16,7 @@ A modular navigation and signaling system for cyclists: a phone dashboard on the
 |---|---|
 | `index.html` | The whole web app (HTML, CSS and JavaScript) |
 | `manifest.webmanifest`, `icon-*.png` | Lets you install it on the phone's home screen |
-| `microbit/rear-light.ts` | micro:bit program (MakeCode JavaScript, needs the `bluetooth` extension) |
+| `microbit/cicloauto-rear-v2/` | micro:bit V2 program (MakeCode project: `main.ts` + `pxt.json` with `bluetooth`, no pairing). Ready-to-flash `.hex` and download page at `/microbit/`. See `microbit/README.md` |
 | `render.yaml` | Deploys the app as a static site on Render (free HTTPS) |
 | `android/` | Early Kivy (Python) prototype, no longer used |
 

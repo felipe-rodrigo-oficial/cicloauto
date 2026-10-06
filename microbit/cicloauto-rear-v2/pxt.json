@@ -1,0 +1,24 @@
+{
+    "name": "cicloauto-rear-v2",
+    "description": "CicloAuto rear light: turn signals, brake light and hazard on the micro:bit V2, controlled by the phone over Bluetooth",
+    "dependencies": {
+        "core": "*",
+        "microphone": "*",
+        "bluetooth": "*"
+    },
+    "files": [
+        "main.ts"
+    ],
+    "preferredEditor": "tsprj",
+    "yotta": {
+        "config": {
+            "microbit-dal": {
+                "bluetooth": {
+                    "open": 1,
+                    "whitelist": 0,
+                    "security_level": null
+                }
+            }
+        }
+    }
+}
